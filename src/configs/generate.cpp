@@ -871,7 +871,8 @@ namespace Configs {
 
         QJsonObject buildDnsObj(BuildContext &ctx, QString address) {
             if (address.startsWith("local")) {
-                if (ctx.tunEnabled && ctx.isResolvedUsed) {
+                // A probe box outlives Tun toggles, and its `local` would follow resolved's `~.` into a running tun (#1975).
+                if (ctx.isResolvedUsed && (ctx.tunEnabled || ctx.forTest)) {
                     return {{"type", "underlying"}};
                 }
                 return {{"type", "local"}};
@@ -2710,6 +2711,9 @@ namespace Configs {
         const auto clearTestBuildFlag = qScopeGuard([] { SetBuildingTestConfig(false); });
         BuildContext ctx;
         ctx.forTest = true;
+#ifdef Q_OS_LINUX
+        ctx.isResolvedUsed = isSystemdResolvedDefaultResolver();
+#endif
 
         for (const auto &item : profiles) {
             if (item == nullptr) continue;
