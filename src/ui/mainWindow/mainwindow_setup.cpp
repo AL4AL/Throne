@@ -437,49 +437,20 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         if (profilesFilterModel->hasActiveFilter()) return;
         if (row1 == row2) return;
         auto group = Configs::dataManager->groupsRepo->CurrentGroup();
+        // A hand-placed row is a manual order, which a kept sort would undo.
+        group->SetSort({});
+        refresh_sort_indicator();
         group->EmplaceProfile(row1, row2);
         profilesTableModel->emplaceProfiles(row1, row2);
         Configs::dataManager->groupsRepo->Save(group);
     };
-    connect(ui->profilesTableView->horizontalHeader(), &QHeaderView::sectionClicked, this, [=, this](int logicalIndex) {
-        GroupSortAction action;
-        if (proxy_last_order == logicalIndex) {
-            action.descending = true;
-            proxy_last_order = -1;
-        } else {
-            proxy_last_order = logicalIndex;
-        }
-        if (logicalIndex == ProfilesTableModel::ColType) {
-            auto group = Configs::dataManager->groupsRepo->CurrentGroup();
-            action.method = (Configs::dataManager->settingsRepo->show_config_security && group
-                             && group->type_sort_by == Configs::typeBy::bySecurity)
-                                ? GroupSortMethod::BySecurity
-                                : GroupSortMethod::ByType;
-        } else if (logicalIndex == ProfilesTableModel::ColAddress) {
-            action.method = GroupSortMethod::ByAddress;
-        } else if (logicalIndex == ProfilesTableModel::ColName) {
-            action.method = GroupSortMethod::ByName;
-        } else if (logicalIndex == ProfilesTableModel::ColTestResult) {
-            action.method = GroupSortMethod::ByTestResult;
-        } else if (logicalIndex == ProfilesTableModel::ColTraffic) {
-            action.method = GroupSortMethod::ByTraffic;
-        } else {
-            return;
-        }
-        runOnNewThread([=, this] {
-            auto currGroup = Configs::dataManager->groupsRepo->CurrentGroup();
-            if (currGroup == nullptr) return;
-            if (!currGroup->SortProfiles(action)) {
-                runOnUiThread([=] {
-                    MessageBoxWarning("Action already in progress", "A sort action is already in progress");
-                });
-                return;
-            }
-            Configs::dataManager->groupsRepo->Save(currGroup);
-            runOnUiThread([=, this] {
-                refresh_proxy_list({}, true);
-            });
-        });
+    connect(ui->profilesTableView->horizontalHeader(), &QHeaderView::sectionClicked, this, [this](int logicalIndex) {
+        const auto group = Configs::dataManager->groupsRepo->CurrentGroup();
+        const auto method = ProfilesTableModel::sortOfColumn(logicalIndex);
+        if (group == nullptr || method == GroupSortMethod::Raw) return;
+        GroupSortAction action{method, false};
+        if (ProfilesTableModel::columnOfSort(group->sort.method) == logicalIndex) action.descending = !group->sort.descending;
+        sortCurrentGroup(action);
     });
     connect(ui->profilesTableView->horizontalHeader(), &QHeaderView::sectionResized, this, [=, this](int, int, int) {
         auto group = Configs::dataManager->groupsRepo->CurrentGroup();
@@ -497,11 +468,22 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         auto group = Configs::dataManager->groupsRepo->CurrentGroup();
         if (group == nullptr) return;
         // The column-widths action carries its shortcut id as data, so it must never be read as a sort key.
-        auto execWithResetWidths = [&](QMenu& menu) -> QAction* {
+        auto execHeaderMenu = [&](QMenu& menu) -> QAction* {
             if (!menu.isEmpty()) menu.addSeparator();
+            QAction* stopSorting = group->KeepsSorted() ? menu.addAction(tr("Stop Sorting")) : nullptr;
             menu.addAction(ui->actionRefresh_Column_Widths);
             auto* chosen = menu.exec(header->mapToGlobal(pos));
+            if (chosen != nullptr && chosen == stopSorting) {
+                stopSortingCurrentGroup();
+                return nullptr;
+            }
             return chosen == ui->actionRefresh_Column_Widths ? nullptr : chosen;
+        };
+        // Picking a key keeps the direction of a sort already on this column.
+        const auto sortColumn = [this, group](int column, bool descendingByDefault) {
+            GroupSortAction action{ProfilesTableModel::sortOfColumn(column), descendingByDefault};
+            if (ProfilesTableModel::columnOfSort(group->sort.method) == column) action.descending = group->sort.descending;
+            sortCurrentGroup(action);
         };
         if (columnIndex == ProfilesTableModel::ColType && Configs::dataManager->settingsRepo->show_config_security) {
             QMenu menu(this);
@@ -520,29 +502,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
                 act->setChecked(group->type_sort_by == opt.value);
             }
 
-            auto* chosen = execWithResetWidths(menu);
+            auto* chosen = execHeaderMenu(menu);
             if (chosen == nullptr || !chosen->data().isValid()) return;
 
             group->type_sort_by = static_cast<Configs::typeBy>(chosen->data().toInt());
-            Configs::dataManager->groupsRepo->Save(group);
-            GroupSortAction action;
-            action.method = group->type_sort_by == Configs::typeBy::bySecurity
-                                ? GroupSortMethod::BySecurity
-                                : GroupSortMethod::ByType;
-            runOnNewThread([=, this] {
-                auto currGroup = Configs::dataManager->groupsRepo->CurrentGroup();
-                if (currGroup == nullptr) return;
-                if (!currGroup->SortProfiles(action)) {
-                    runOnUiThread([=] {
-                        MessageBoxWarning("Action already in progress", "A sort action is already in progress");
-                    });
-                    return;
-                }
-                Configs::dataManager->groupsRepo->Save(currGroup);
-                runOnUiThread([=, this] {
-                    refresh_proxy_list({}, true);
-                });
-            });
+            sortColumn(ProfilesTableModel::ColType, false);
             return;
         }
         if (columnIndex == ProfilesTableModel::ColTestResult) {
@@ -595,29 +559,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
                 act->setChecked(static_cast<int>(group->test_sort_by) == opt.value);
             }
 
-            auto* chosen = execWithResetWidths(menu);
+            auto* chosen = execHeaderMenu(menu);
             if (chosen == nullptr || !chosen->data().isValid()) return;
 
-            int testSortBy = chosen->data().toInt();
-            group->test_sort_by = static_cast<Configs::testBy>(testSortBy);
-            Configs::dataManager->groupsRepo->Save(group);
-            GroupSortAction action;
-            action.method = GroupSortMethod::ByTestResult;
-            action.descending = true;
-            runOnNewThread([=, this] {
-                auto currGroup = Configs::dataManager->groupsRepo->CurrentGroup();
-                if (currGroup == nullptr) return;
-                if (!currGroup->SortProfiles(action)) {
-                    runOnUiThread([=] {
-                        MessageBoxWarning("Action already in progress", "A sort action is already in progress");
-                        });
-                    return;
-                }
-                Configs::dataManager->groupsRepo->Save(currGroup);
-                runOnUiThread([=, this] {
-                    refresh_proxy_list({}, true);
-                    });
-                });
+            group->test_sort_by = static_cast<Configs::testBy>(chosen->data().toInt());
+            sortColumn(ProfilesTableModel::ColTestResult, true);
             return;
         }
         if (columnIndex == ProfilesTableModel::ColTraffic) {
@@ -639,33 +585,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
                 act->setChecked(static_cast<int>(group->traffic_sort_by) == opt.value);
             }
 
-            auto* chosen = execWithResetWidths(menu);
+            auto* chosen = execHeaderMenu(menu);
             if (chosen == nullptr || !chosen->data().isValid()) return;
 
-            int trafficSortBy = chosen->data().toInt();
-            group->traffic_sort_by = static_cast<Configs::trafficBy>(trafficSortBy);
-            Configs::dataManager->groupsRepo->Save(group);
-            GroupSortAction action;
-            action.method = GroupSortMethod::ByTraffic;
-            action.descending = false;
-            runOnNewThread([=, this] {
-                auto currGroup = Configs::dataManager->groupsRepo->CurrentGroup();
-                if (currGroup == nullptr) return;
-                if (!currGroup->SortProfiles(action)) {
-                    runOnUiThread([=] {
-                        MessageBoxWarning("Action already in progress", "A sort action is already in progress");
-                        });
-                    return;
-                }
-                Configs::dataManager->groupsRepo->Save(Configs::dataManager->groupsRepo->CurrentGroup());
-                runOnUiThread([=, this] {
-                    refresh_proxy_list();
-                    });
-                });
+            group->traffic_sort_by = static_cast<Configs::trafficBy>(chosen->data().toInt());
+            sortColumn(ProfilesTableModel::ColTraffic, false);
             return;
         }
         QMenu menu(this);
-        execWithResetWidths(menu);
+        execHeaderMenu(menu);
     });
     ui->profilesTableView->verticalHeader()->setStretchLastSection(false);
     ui->profilesTableView->verticalHeader()->setDefaultSectionSize(24);

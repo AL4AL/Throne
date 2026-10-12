@@ -346,7 +346,6 @@ private:
     bool m_ruleSetUpdateBusy = false;
     QString traffic_update_cache;
     qint64 last_test_time = 0;
-    int proxy_last_order = -1;
     bool select_mode = false;
     QMutex mu_starting;
     QMutex mu_stopping;
@@ -497,6 +496,13 @@ private:
     void import_text(const QString &text);
 
     void refresh_proxy_list_column_size();
+
+    void refresh_sort_indicator();
+
+    // Keeps the current group sorted by `action` from now on.
+    void sortCurrentGroup(GroupSortAction action);
+
+    void stopSortingCurrentGroup();
 
     void refresh_proxy_list_impl(const QList<int> &ids = {}, bool mayNeedReset = false);
 

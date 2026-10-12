@@ -367,7 +367,33 @@ void MainWindow::refresh_proxy_list_impl(const QList<int>& ids, bool mayNeedRese
         return;
     }
     refresh_proxy_list_impl_refresh_data(ids, mayNeedReset);
+    refresh_sort_indicator();
     refresh_proxy_list_column_size();
+}
+
+void MainWindow::refresh_sort_indicator() {
+    const auto group = Configs::dataManager->groupsRepo->CurrentGroup();
+    const int column = group == nullptr ? -1 : ProfilesTableModel::columnOfSort(group->sort.method);
+    const auto order = group != nullptr && group->sort.descending ? Qt::DescendingOrder : Qt::AscendingOrder;
+    // Section -1 hides the indicator.
+    ui->profilesTableView->horizontalHeader()->setSortIndicator(column, order);
+}
+
+void MainWindow::sortCurrentGroup(GroupSortAction action) {
+    const auto group = Configs::dataManager->groupsRepo->CurrentGroup();
+    if (group == nullptr) return;
+    group->SetSort(action);
+    Configs::dataManager->groupsRepo->Save(group);
+    refresh_sort_indicator();
+    Configs::ResortLater(group->id);
+}
+
+void MainWindow::stopSortingCurrentGroup() {
+    const auto group = Configs::dataManager->groupsRepo->CurrentGroup();
+    if (group == nullptr) return;
+    group->SetSort({});
+    Configs::dataManager->groupsRepo->Save(group);
+    refresh_sort_indicator();
 }
 
 void MainWindow::refresh_proxy_list_impl_refresh_data(const QList<int>& ids, bool mayNeedReset) {
