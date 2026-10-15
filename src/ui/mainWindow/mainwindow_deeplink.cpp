@@ -172,9 +172,10 @@ void MainWindow::handle_import_route(const QString &url) {
 
     auto prompt = tr("Add this routing profile?\n\nName: %1").arg(profile->name);
     if (!warnings.isEmpty()) prompt += "\n\n" + tr("Note:") + "\n" + warnings.trimmed();
-    if (QMessageBox::question(GetMessageBoxParent(), tr("Import routing profile"), prompt) != QMessageBox::StandardButton::Yes) {
-        return;
-    }
+    QMessageBox box(QMessageBox::Question, tr("Import routing profile"), prompt, QMessageBox::Yes | QMessageBox::No, GetMessageBoxParent());
+    // The name and the notes come from the link: AutoText would render a tag-like one as HTML.
+    box.setTextFormat(Qt::PlainText);
+    if (box.exec() != QMessageBox::Yes) return;
 
     Configs::dataManager->routesRepo->AddRouteProfile(profile);
 }
@@ -243,7 +244,7 @@ void MainWindow::handle_addsub(const QString &url, const QString &name) {
     group->skip_auto_update = !autoUpdate;
     Configs::dataManager->groupsRepo->AddGroup(group);
     refresh_groups();
-    Subscription::updater()->RefreshGroup(group->id);
+    Subscription::updater()->RefreshGroup(group->id, nullptr, Subscription::GroupUpdater::Surface::Report);
 }
 
 void MainWindow::import_or_handle_deeplink(const QString &text) {
@@ -373,7 +374,10 @@ void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
     case MwMessage::SubscriptionFinished:
         refresh_proxy_list({}, true);
         if (!changed(MwArg::Quiet)) {
-            MW_show_log(tr("Imported %1 profile(s)").arg(settings->imported_count));
+            // The job's own count: the global may already belong to the next job.
+            bool counted = false;
+            const int count = args.value(0).toInt(&counted);
+            MW_show_log(tr("Imported %1 profile(s)").arg(counted ? count : settings->imported_count));
         }
         break;
     case MwMessage::SubscriptionNewGroup:

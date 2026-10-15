@@ -1,6 +1,7 @@
 #include "include/configs/sub/GroupUpdater.hpp"
 
 #include "include/configs/generate.h"
+#include "include/configs/sub/ImportReport.hpp"
 #include "include/configs/sub/SubscriptionParser.hpp"
 #include "include/configs/sub/SubscriptionReconcile.hpp"
 #include "include/configs/sub/SubscriptionScan.hpp"
@@ -9,10 +10,12 @@
 #include "include/global/HTTPRequestHelper.hpp"
 #include "include/global/Utils.hpp"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QMutexLocker>
+#include <QRegularExpression>
 #include <QThreadPool>
 #include <QUrl>
 
@@ -169,6 +172,11 @@ namespace Subscription {
                 if (group != nullptr && group->Reposition(added)) Configs::dataManager->groupsRepo->Save(group);
             }
 
+            // Rows that really reached the database: added, or reused from the group.
+            [[nodiscard]] int stored() const {
+                return static_cast<int>(std::count_if(entries.cbegin(), entries.cend(), [](const NewEntry &e) { return e.id >= 0; }));
+            }
+
             QList<NewEntry> entries;
 
         private:
@@ -180,25 +188,62 @@ namespace Subscription {
             QList<qsizetype> entryIndex;
         };
 
-        ParseSink sinkFor(ImportSink &sink) {
+        ParseSink sinkFor(ImportSink &sink, ImportReport &report) {
             ParseSink parseSink;
             parseSink.profile = [&sink](std::shared_ptr<Configs::Profile> ent) { sink.add(std::move(ent)); };
-            parseSink.log = [](const QString &line) { MW_show_log(line); };
-            parseSink.warn = [](const QString &title, const QString &text) {
-                runOnUiThread([=] { MessageBoxWarning(title, text); });
-            };
+            parseSink.report = [&report](const ParseReport &item) { report.add(item); };
             return parseSink;
         }
 
-        // A dry run, as the real parse inserts as it goes. Its diagnostics are held back: the real parse repeats them.
-        bool yieldsProfile(const QByteArray &body, QStringList &diagnostics) {
+        // A dry run, as the real parse inserts as it goes. Its diagnostics only matter when it finds nothing: otherwise the real parse repeats them.
+        bool yieldsProfile(const QByteArray &body, ImportReport &diagnostics) {
             bool found = false;
             ParseSink probe;
             probe.profile = [&found](const std::shared_ptr<Configs::Profile> &) { found = true; };
-            probe.log = [&diagnostics](const QString &line) { diagnostics << line; };
-            probe.warn = [&diagnostics](const QString &title, const QString &text) { diagnostics << title + ": " + text; };
+            probe.report = [&diagnostics](const ParseReport &item) { diagnostics.add(item); };
             ParseDocument(body, probe);
             return found;
+        }
+
+        void logImportReport(const ImportReport &report) {
+            QString text = report.summary();
+            if (const auto details = report.details(); !details.isEmpty()) text += '\n' + details;
+            MW_show_log(text);
+        }
+
+        // Qt's HTTP error text embeds the request (or redirect) URL, and with it the subscription token.
+        QString withoutUrls(const QString &text, const QString &url) {
+            const auto hostOf = [](const QUrl &u) { return u.host().isEmpty() ? QString(QChar(0x2026)) : u.host(); };
+            const QUrl parsed(url);
+            QString redacted = text;
+            for (const auto &form : {url, parsed.toString(), parsed.toString(QUrl::FullyEncoded), parsed.toDisplayString()}) {
+                if (!form.isEmpty()) redacted.replace(form, hostOf(parsed));
+            }
+            static const QRegularExpression urlRe(R"([A-Za-z][A-Za-z0-9+.\-]*://[^\s"'<>]+)");
+            QString result;
+            qsizetype last = 0;
+            for (auto it = urlRe.globalMatch(redacted); it.hasNext();) {
+                const auto match = it.next();
+                result += QStringView(redacted).mid(last, match.capturedStart() - last);
+                result += hostOf(QUrl(match.captured()));
+                last = match.capturedEnd();
+            }
+            result += QStringView(redacted).mid(last);
+            return result;
+        }
+
+        QString fetchFailure(const QString &error) {
+            return QCoreApplication::translate("Validation", "Could not download the subscription: %1").arg(error);
+        }
+
+        QString reportTitle(GroupUpdater::Surface surface, const QString &groupName) {
+            return surface == GroupUpdater::Surface::Report
+                ? QCoreApplication::translate("Validation", "New subscription: %1").arg(groupName)
+                : QCoreApplication::translate("Validation", "Update of %1").arg(groupName);
+        }
+
+        void reportDeleteFailure() {
+            PostPassiveWarning("Internal error", "DB Error when deleting profiles, data may be corrupted");
         }
 
         QString notice(const QStringList &names, const QString &prefix, const QString &action) {
@@ -346,7 +391,7 @@ namespace Subscription {
             if (doomed.isEmpty()) return {};
             const auto outcome = deleteProfiles(doomed);
             if (!outcome.ok) {
-                runOnUiThread([] { MessageBoxWarning("Internal error", "DB Error when deleting profiles, data may be corrupted"); });
+                reportDeleteFailure();
             }
             report += sections;
             if (!outcome.kept.isEmpty()) report += "\n" + QObject::tr("The running profile was kept.");
@@ -366,7 +411,7 @@ namespace Subscription {
                 if (!doomed.isEmpty()) {
                     const auto outcome = deleteProfiles(doomed);
                     if (!outcome.ok) {
-                        runOnUiThread([] { MessageBoxWarning("Internal error", "DB Error when deleting profiles, data may be corrupted"); });
+                        reportDeleteFailure();
                     }
                     deleted = outcome.deleted;
                     report += "\n" + QObject::tr("Removed %1 unavailable profiles:").arg(names.size()) + "\n" + notice(names, "[-]", "removed");
@@ -433,6 +478,10 @@ namespace Subscription {
     }
 
     void GroupUpdater::RefreshGroup(int gid, const Finish &finish, bool showDiff) {
+        RefreshGroup(gid, finish, showDiff ? Surface::Diff : Surface::Log);
+    }
+
+    void GroupUpdater::RefreshGroup(int gid, const Finish &finish, Surface surface) {
         QMutexLocker locker(&mutex);
         if (pending.contains(gid)) {
             locker.unlock();
@@ -442,10 +491,9 @@ namespace Subscription {
         }
         pending.insert(gid);
         enqueueLocked({gid, false, [=, this] {
-            refresh(gid, showDiff);
+            refresh(gid, surface);
             emit asyncUpdateCallback(gid);
-            if (finish != nullptr) finish();
-        }});
+        }, finish});
     }
 
     void GroupUpdater::RefreshAll(bool onlyAllowed) {
@@ -462,9 +510,9 @@ namespace Subscription {
             pending.insert(gid);
             ++pendingBatch;
             enqueueLocked({gid, true, [=, this] {
-                refresh(gid, false);
+                refresh(gid, Surface::Log);
                 emit asyncUpdateCallback(gid);
-            }});
+            }, nullptr});
         }
     }
 
@@ -505,12 +553,12 @@ namespace Subscription {
             auto group = Configs::GroupsRepo::NewGroup();
             group->name = QUrl(content).host();
             group->url = content;
+            // Stored before the download: a failed one is fixed through the group's own TLS, HTTP and User Agent settings.
             Configs::dataManager->groupsRepo->AddGroup(group);
             MW_dialog_message(MwMessage::SubscriptionNewGroup, {});
-            refresh(group->id, false);
+            refresh(group->id, Surface::Report);
             emit asyncUpdateCallback(group->id);
-            if (finish != nullptr) finish();
-        }});
+        }, finish});
     }
 
     void GroupUpdater::ImportUrl(const QString &url, const Finish &finish) {
@@ -518,10 +566,19 @@ namespace Subscription {
         enqueue({-1, false, [=, this] {
             QByteArray body;
             Configs::SubUserInfo subInfo;
-            if (fetch(content, content, ResolveIdentity(nullptr), body, subInfo)) importDocuments(-1, {std::move(body)});
+            QString error;
+            if (fetch(content, QUrl(content).host(), ResolveIdentity(nullptr), body, subInfo, &error)) {
+                const auto emptyReason = looksLikeWebPage(body)
+                    ? QCoreApplication::translate("Validation", "The server returned a web page instead of a subscription.")
+                    : QString();
+                importDocuments(-1, {std::move(body)}, emptyReason);
+            } else {
+                ImportReport report;
+                report.addFatal(fetchFailure(error));
+                ShowImportReport(QCoreApplication::translate("Validation", "Import"), report);
+            }
             emit asyncUpdateCallback(-1);
-            if (finish != nullptr) finish();
-        }});
+        }, finish});
     }
 
     void GroupUpdater::ImportText(const QString &text, int gid, const Finish &finish) {
@@ -529,8 +586,7 @@ namespace Subscription {
         enqueue({-1, false, [=, this]() mutable {
             importDocuments(gid, {std::move(body)});
             emit asyncUpdateCallback(gid);
-            if (finish != nullptr) finish();
-        }});
+        }, finish});
     }
 
     void GroupUpdater::ImportBatch(const QStringList &payloads, const Finish &finish) {
@@ -540,33 +596,43 @@ namespace Subscription {
         enqueue({-1, false, [=, this]() mutable {
             importDocuments(-1, std::move(documents));
             emit asyncUpdateCallback(-1);
-            if (finish != nullptr) finish();
-        }});
+        }, finish});
     }
 
     void GroupUpdater::CloneProfiles(const QList<int> &ids, const Finish &finish) {
-        QList<QPair<QByteArray, Configs::EndpointSource>> copies;
+        // A direct copy, not a link round trip: links refuse the types whose state only means something here.
+        struct CloneSource {
+            QString type;
+            QString name;
+            QJsonObject outbound;
+            Configs::EndpointSource endpoint;
+            QString display;
+        };
+        QList<CloneSource> sources;
         for (const auto &ent : Configs::dataManager->profilesRepo->GetProfileBatch(ids)) {
-            copies.append({ent->outbound->ExportJsonLink().toUtf8(), ent->endpoint});
+            if (ent == nullptr || ent->outbound == nullptr) continue;
+            sources.append({ent->type, ent->name, ent->outbound->ExportToJson(), ent->endpoint, ent->outbound->DisplayTypeAndName()});
         }
         enqueue({-1, false, [=, this] {
             auto &settings = Configs::dataManager->settingsRepo;
             settings->imported_count = 0;
             ImportSink sink(-1, nullptr);
-            auto parseSink = sinkFor(sink);
-            for (const auto &copy : copies) {
-                parseSink.profile = [&sink, endpoint = copy.second](std::shared_ptr<Configs::Profile> ent) {
-                    ent->endpoint = endpoint;
-                    sink.add(std::move(ent));
-                };
-                ParseDocument(copy.first, parseSink);
+            for (const auto &source : sources) {
+                auto clone = Configs::ProfilesRepo::NewProfile(source.type);
+                if (clone->outbound == nullptr || clone->outbound->invalid || !clone->outbound->ParseFromJson(source.outbound)) {
+                    MW_show_log(QCoreApplication::translate("Validation", "Could not copy %1.").arg(source.display));
+                    continue;
+                }
+                clone->name = source.name;
+                clone->endpoint = source.endpoint;
+                sink.add(std::move(clone));
             }
             sink.finish();
-            settings->imported_count = sink.entries.size();
-            MW_dialog_message(MwMessage::SubscriptionFinished, {});
+            const int count = sink.stored();
+            settings->imported_count = count;
+            MW_dialog_message(MwMessage::SubscriptionFinished, {Int2String(count)});
             emit asyncUpdateCallback(-1);
-            if (finish != nullptr) finish();
-        }});
+        }, finish});
     }
 
     void GroupUpdater::enqueue(Job job) {
@@ -592,20 +658,26 @@ namespace Subscription {
                 }
                 job = queue.takeFirst();
             }
-            try {
-                job.run();
-            } catch (const std::exception &ex) {
-                MW_show_log(QString("Subscription task failed: %1").arg(ex.what()));
-            } catch (...) {
-                MW_show_log("Subscription task failed.");
-            }
+            const auto guarded = [](const std::function<void()> &step) {
+                try {
+                    step();
+                } catch (const std::exception &ex) {
+                    MW_show_log(QString("Subscription task failed: %1").arg(ex.what()));
+                } catch (...) {
+                    MW_show_log("Subscription task failed.");
+                }
+            };
+            guarded(job.run);
+            // The UI clears its "updating" state in finish, so it must run even after a throw.
+            if (job.finish != nullptr) guarded(job.finish);
             QMutexLocker locker(&mutex);
             if (job.gid >= 0) pending.remove(job.gid);
             if (job.batch) --pendingBatch;
         }
     }
 
-    bool GroupUpdater::fetch(const QString &url, const QString &name, const RequestIdentity &identity, QByteArray &body, Configs::SubUserInfo &subInfo) {
+    bool GroupUpdater::fetch(const QString &url, const QString &name, const RequestIdentity &identity, QByteArray &body,
+                             Configs::SubUserInfo &subInfo, QString *error) {
         MW_show_log(">>>>>>>> " + QObject::tr("Requesting subscription: %1").arg(name));
         HttpGetOptions options;
         options.maxBytes = kMaxSubscriptionBytes;
@@ -615,7 +687,9 @@ namespace Subscription {
         options.http2 = identity.httpVersion != Configs::subHttpVersion::http11;
         auto resp = NetworkRequestHelper::HttpGet(url, options);
         if (!resp.error.isEmpty()) {
-            MW_show_log("<<<<<<<< " + QObject::tr("Requesting subscription %1 error: %2").arg(name, resp.error + "\n" + resp.data));
+            const auto reason = withoutUrls(resp.error, url);
+            MW_show_log("<<<<<<<< " + QObject::tr("Requesting subscription %1 error: %2").arg(name, reason + "\n" + withoutUrls(QString::fromUtf8(resp.data), url)));
+            if (error != nullptr) *error = reason;
             return false;
         }
         body = std::move(resp.data);
@@ -711,54 +785,89 @@ namespace Subscription {
         return true;
     }
 
-    void GroupUpdater::importDocuments(int gid, QList<QByteArray> documents) {
+    void GroupUpdater::importDocuments(int gid, QList<QByteArray> documents, const QString &emptyReason) {
         auto &settings = Configs::dataManager->settingsRepo;
         settings->imported_count = 0;
         ImportSink sink(gid, nullptr);
+        ImportReport report;
 
         MW_show_log(">>>>>>>> " + QObject::tr("Processing subscription data..."));
-        for (auto &document : documents) ParseDocument(std::move(document), sinkFor(sink));
+        for (auto &document : documents) ParseDocument(std::move(document), sinkFor(sink, report));
         sink.finish();
         MW_show_log(">>>>>>>> " + QObject::tr("Process complete, applying..."));
 
-        settings->imported_count = sink.entries.size();
-        MW_dialog_message(MwMessage::SubscriptionFinished, {});
+        const int count = sink.stored();
+        report.setImported(count);
+        if (const auto lost = static_cast<int>(sink.entries.size()) - count; lost > 0) {
+            report.addFatal(QCoreApplication::translate("Validation", "%n profile(s) could not be saved to the database.", nullptr, lost));
+        }
+        if (count == 0) {
+            if (!emptyReason.isEmpty()) report.addFatal(emptyReason);
+            else if (!report.hasProblems()) report.addFatal(QCoreApplication::translate("Validation", "No profiles were found."));
+        }
+        settings->imported_count = count;
+        // The logged summary already carries the count, so the handler's own count line is skipped.
+        if (report.hasProblems()) {
+            logImportReport(report);
+            ShowImportReport(QCoreApplication::translate("Validation", "Import"), report);
+            MW_dialog_message(MwMessage::SubscriptionFinished, {MwArg::Quiet});
+        } else {
+            MW_dialog_message(MwMessage::SubscriptionFinished, {Int2String(count)});
+        }
     }
 
-    void GroupUpdater::refresh(int gid, bool showDiff) {
-        auto &settings = Configs::dataManager->settingsRepo;
-        auto &profilesRepo = Configs::dataManager->profilesRepo;
-        auto &groupsRepo = Configs::dataManager->groupsRepo;
-
-        settings->imported_count = 0;
-        auto group = groupsRepo->GetGroup(gid);
+    void GroupUpdater::refresh(int gid, Surface surface) {
+        Configs::dataManager->settingsRepo->imported_count = 0;
+        auto group = Configs::dataManager->groupsRepo->GetGroup(gid);
         if (group == nullptr || group->archive) return;
-        const auto options = group->sub_options;
 
         const QString url = group->url.trimmed();
         QByteArray body;
         Configs::SubUserInfo subInfo;
-        if (!fetch(url, group->name, ResolveIdentity(group.get()), body, subInfo)) return;
+        QString error;
+        if (!fetch(url, group->name, ResolveIdentity(group.get()), body, subInfo, &error)) {
+            if (surface != Surface::Log) {
+                ImportReport report;
+                report.addFatal(fetchFailure(error));
+                if (surface == Surface::Report) {
+                    report.addFatal(QCoreApplication::translate("Validation", "The group %1 was created, but its first download failed. Update it to try again; if the download keeps failing, try another TLS version, HTTP version or User Agent in the group's Advanced settings.").arg(group->name));
+                }
+                ShowImportReport(reportTitle(surface, group->name), report);
+            }
+            return;
+        }
+        applyRefresh(group, url, std::move(body), subInfo, surface);
+    }
+
+    void GroupUpdater::applyRefresh(const std::shared_ptr<Configs::Group> &group, const QString &url, QByteArray body,
+                                    const Configs::SubUserInfo &subInfo, Surface surface) {
+        auto &settings = Configs::dataManager->settingsRepo;
+        auto &profilesRepo = Configs::dataManager->profilesRepo;
+        auto &groupsRepo = Configs::dataManager->groupsRepo;
+        const int gid = group->id;
+        const auto options = group->sub_options;
+
         if (group->url.trimmed() != url) {
             MW_show_log(QObject::tr("The URL of %1 changed during the update, so the result was discarded.").arg(group->name));
             return;
         }
 
         // Not a single profile is far likelier a broken or blocked response than an emptied subscription: touch nothing.
-        QStringList diagnostics;
-        if (!yieldsProfile(body, diagnostics)) {
-            for (const auto &line : diagnostics) MW_show_log(line);
+        ImportReport probeReport;
+        if (!yieldsProfile(body, probeReport)) {
             if (looksLikeWebPage(body)) {
-                MW_show_log(QObject::tr("The server returned a web page instead of a subscription. If it is a CAPTCHA or a bot check, try another TLS version, HTTP version or User Agent in the group's Advanced settings."));
+                probeReport.addFatal(QObject::tr("The server returned a web page instead of a subscription. If it is a CAPTCHA or a bot check, try another TLS version, HTTP version or User Agent in the group's Advanced settings."));
             }
             // Panels answer a device or quota limit with an empty list and an announcement saying why.
             if (subInfo.valid) {
-                if (!subInfo.announce.isEmpty()) MW_show_log(QObject::tr("Announcement from %1: %2").arg(group->name, subInfo.announce));
+                if (!subInfo.announce.isEmpty()) probeReport.addFatal(QObject::tr("Announcement from %1: %2").arg(group->name, subInfo.announce));
                 group->sub_info = subInfo;
                 group->info.clear();
                 groupsRepo->Save(group);
             }
-            MW_show_log("<<<<<<<< " + QObject::tr("No profiles found in the subscription: %1 was left unchanged.").arg(group->name));
+            probeReport.addFatal(QObject::tr("No profiles found in the subscription: %1 was left unchanged.").arg(group->name));
+            logImportReport(probeReport);
+            if (surface != Surface::Log) ShowImportReport(reportTitle(surface, group->name), probeReport);
             return;
         }
 
@@ -799,7 +908,7 @@ namespace Subscription {
             }
             const auto outcome = deleteProfiles(doomed);
             if (!outcome.ok) {
-                runOnUiThread([] { MessageBoxWarning("Internal Error", "DB Error when deleting profiles, Please try again."); });
+                PostPassiveWarning("Internal Error", "DB Error when deleting profiles, Please try again.");
                 return;
             }
             disturbed = outcome.deleted;
@@ -817,11 +926,13 @@ namespace Subscription {
         }
         ContentIndex index(old);
         ImportSink sink(gid, cleared ? nullptr : &index);
+        ImportReport report;
 
         MW_show_log(">>>>>>>> " + QObject::tr("Processing subscription data..."));
-        ParseDocument(std::move(body), sinkFor(sink));
+        ParseDocument(std::move(body), sinkFor(sink, report));
         sink.flush();
         MW_show_log(">>>>>>>> " + QObject::tr("Process complete, applying..."));
+        report.setImported(sink.stored());
 
         QString change_text;
         if (cleared) {
@@ -856,7 +967,7 @@ namespace Subscription {
 
             const auto outcome = deleteProfiles(stale);
             if (!outcome.ok) {
-                runOnUiThread([] { MessageBoxWarning("Internal error", "DB Error when deleting profiles, data may be corrupted"); });
+                reportDeleteFailure();
             }
             disturbed << outcome.deleted;
 
@@ -918,11 +1029,18 @@ namespace Subscription {
         groupsRepo->Save(group);
 
         MW_show_log("<<<<<<<< " + QObject::tr("Change of %1:").arg(group->name) + "\n" + change_text);
-        if (showDiff && settings->sub_show_change_popup) {
+        if (report.hasProblems()) logImportReport(report);
+        if (surface == Surface::Diff && settings->sub_show_change_popup) {
             const auto diffTitle = QObject::tr("Change of %1").arg(group->name);
             auto diffBody = change_text.trimmed();
             if (diffBody.isEmpty()) diffBody = QObject::tr("Nothing");
+            if (report.hasProblems()) {
+                diffBody += "\n\n" + QCoreApplication::translate("Validation", "Problems:") + "\n" + report.summary();
+                if (const auto details = report.details(); !details.isEmpty()) diffBody += "\n" + details;
+            }
             runOnUiThread([diffTitle, diffBody] { MessageBoxScrollable(diffTitle, diffBody); });
+        } else if (surface != Surface::Log && report.hasProblems()) {
+            ShowImportReport(reportTitle(surface, group->name), report);
         }
         // Auto selectors resolve members from the group at build time, so a refresh can invalidate an untouched one.
         QStringList selectorArgs{Int2String(group->id)};
@@ -941,7 +1059,7 @@ namespace Subscription {
         }
         if (tester == nullptr) return;
         // Back through the queue, so the follow-up never races another job over the group.
-        tester(profileIDs, [=, this] { enqueue({-1, false, [=, this] { afterUrlTest(gid); }}); });
+        tester(profileIDs, [=, this] { enqueue({-1, false, [=, this] { afterUrlTest(gid); }, nullptr}); });
     }
 
     void GroupUpdater::afterUrlTest(int gid) {

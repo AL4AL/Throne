@@ -10,6 +10,10 @@ namespace Ui {
 }
 QT_END_NAMESPACE
 
+namespace Validation {
+    class Form;
+}
+
 class DialogPresetSettings : public QDialog {
     Q_OBJECT
 
@@ -20,6 +24,8 @@ public:
 
 private:
     Ui::DialogPresetSettings *ui;
+
+    Validation::Form *form = nullptr;
 
 public slots:
 

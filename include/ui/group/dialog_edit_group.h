@@ -7,6 +7,10 @@
 
 class QComboBox;
 
+namespace Validation {
+    class Form;
+}
+
 QT_BEGIN_NAMESPACE
 namespace Ui {
     class DialogEditGroup;
@@ -44,6 +48,8 @@ private:
     bool restartNeeded = false;
 
     QHash<QString, int> proxyNameToId;
+
+    Validation::Form *form = nullptr;
 
     int resolve_proxy_selection(QComboBox *combo, int fallback) const;
 

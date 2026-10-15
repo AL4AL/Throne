@@ -8,6 +8,7 @@
 #include "include/database/entities/Profile.h"
 #include "include/stats/autoselector/AutoSelectorMonitor.hpp"
 #include "include/ui/mainwindow_interface.h"
+#include "include/ui/utils/ValidationForm.h"
 
 #include <QFormLayout>
 #include <QGridLayout>
@@ -141,6 +142,13 @@ void EditAutoSelector::onStart(std::shared_ptr<Configs::Profile> _ent) {
     m_loading = false;
     updateBalanceEnabled();
     refreshPlanSummary();
+
+    // Fields of a collapsed section are not checked, so a stored bad value has to be shown.
+    using namespace Configs::Checks;
+    const bool advancedInvalid = !AutoSelectorCountries(outbound->countryFilter).isEmpty() ||
+                                 !AutoSelectorUrl(outbound->testURL).isEmpty() ||
+                                 !AutoSelectorUrl(outbound->connectivityURL).isEmpty();
+    if (advancedInvalid) ui->advanced_toggle->setChecked(true);
 }
 
 bool EditAutoSelector::onEnd() {
@@ -151,20 +159,7 @@ bool EditAutoSelector::onEnd() {
     auto outbound = this->ent->AutoSelector();
     if (outbound == nullptr) return false;
 
-    const int gid = ui->group->currentData().toInt();
-    if (ui->group->currentIndex() < 0) {
-        MessageBoxWarning(software_name, tr("Select the group this auto selector should track."));
-        return false;
-    }
-    if (!ui->name_filter->text().trimmed().isEmpty()) {
-        if (const QRegularExpression re(ui->name_filter->text()); !re.isValid()) {
-            MessageBoxWarning(software_name, tr("The name filter is not a valid regular expression: %1")
-                                                 .arg(re.errorString()));
-            return false;
-        }
-    }
-
-    outbound->gid = gid;
+    outbound->gid = ui->group->currentData().toInt();
     outbound->nameFilter = ui->name_filter->text().trimmed();
     outbound->countryFilter = ui->country_filter->text().trimmed();
     outbound->excludeUnavailable = ui->exclude_unavailable->isChecked();
@@ -189,6 +184,7 @@ bool EditAutoSelector::onEnd() {
     outbound->expected = ui->expected->value();
     outbound->balanceMode = ui->balance_mode->currentData().toString();
     outbound->balanceIntervalSec = ui->balance_interval->value();
+    // The cross-field rules have passed, so this only clamps what the spin boxes cannot produce.
     outbound->Normalize();
 
     // The pool is a ranking, so a filter change can leave entries that no longer qualify.
@@ -200,6 +196,55 @@ bool EditAutoSelector::onEnd() {
     }
     outbound->pool = pool;
     return true;
+}
+
+void EditAutoSelector::bindValidation(Validation::Form &form) {
+    using namespace Validation;
+    using namespace Configs::Checks;
+    form.addRule({ui->group}, [this] {
+        return ui->group->currentIndex() < 0 ? tr("Select the group this auto selector should track.") : QString();
+    }, this);
+    form.bind(ui->name_filter, Rules::Regex(), this);
+    form.bind(ui->country_filter, AutoSelectorCountries, this);
+    form.bind(ui->test_url, AutoSelectorUrl, this);
+    form.bind(ui->connectivity_url, AutoSelectorUrl, this);
+    form.addRule({ui->build_limit, ui->pool_cap}, [this] {
+        return AutoSelectorBuildLimit(ui->build_limit->value(), ui->pool_cap->value());
+    }, this);
+    form.addRule({ui->bench_interval, ui->interval}, [this] {
+        return AutoSelectorBenchInterval(ui->bench_interval->value(), ui->interval->value());
+    }, this);
+    form.addRule({ui->watch_interval, ui->interval}, [this] {
+        return AutoSelectorWatchInterval(ui->watch_interval->value(), ui->interval->value());
+    }, this);
+    form.addRule({ui->active_size, ui->expected}, [this] {
+        return AutoSelectorReadyCount(ui->active_size->value(), ui->expected->value());
+    }, this);
+    form.addRule({ui->active_size, ui->build_limit}, [this] {
+        return AutoSelectorCloseCount(ui->active_size->value(), ui->build_limit->value());
+    }, this);
+
+    // The rules above skip a collapsed section, so its problems are reported here and expand it when revealed.
+    form.addIssueSource([this] {
+        QList<FormIssue> issues;
+        if (!ui->advanced_area->isHidden()) return issues;
+        const auto add = [this, &issues](QWidget *widget, const QString &message) {
+            if (message.isEmpty()) return;
+            issues.append({Severity::Error, {}, message, widget, [this, widget]() -> QWidget * {
+                ui->advanced_toggle->setChecked(true);
+                return widget;
+            }});
+        };
+        add(ui->country_filter, AutoSelectorCountries(ui->country_filter->text().trimmed()));
+        add(ui->test_url, AutoSelectorUrl(ui->test_url->text().trimmed()));
+        add(ui->connectivity_url, AutoSelectorUrl(ui->connectivity_url->text().trimmed()));
+        add(ui->build_limit, AutoSelectorBuildLimit(ui->build_limit->value(), ui->pool_cap->value()));
+        add(ui->bench_interval, AutoSelectorBenchInterval(ui->bench_interval->value(), ui->interval->value()));
+        add(ui->watch_interval, AutoSelectorWatchInterval(ui->watch_interval->value(), ui->interval->value()));
+        add(ui->active_size, AutoSelectorReadyCount(ui->active_size->value(), ui->expected->value()));
+        add(ui->active_size, AutoSelectorCloseCount(ui->active_size->value(), ui->build_limit->value()));
+        return issues;
+    }, this);
 }
 
 void EditAutoSelector::refreshPinnedRow() const

@@ -9,6 +9,10 @@ namespace Ui {
 }
 QT_END_NAMESPACE
 
+namespace Validation {
+    class Form;
+}
+
 class DialogVPNSettings : public QDialog {
     Q_OBJECT
 
@@ -19,6 +23,8 @@ public:
 
 private:
     Ui::DialogVPNSettings *ui;
+
+    Validation::Form *form = nullptr;
 
 public slots:
 

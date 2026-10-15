@@ -8,8 +8,10 @@
 #include "include/global/Configs.hpp"
 #include "include/global/HTTPRequestHelper.hpp"
 #include "include/global/DeviceDetailsHelper.hpp"
+#include "include/global/Validation.hpp"
 #include "include/database/entities/Group.h"
 #include "include/scanner/ScanManager.h"
+#include "include/ui/utils/ValidationForm.h"
 
 #include <QStyleFactory>
 #include <QFileDialog>
@@ -17,8 +19,6 @@
 #include <QMessageBox>
 #include <QPixmap>
 #include <QTimer>
-#include <QBrush>
-#include <QRegularExpression>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <qfontdatabase.h>
@@ -40,14 +40,85 @@
 #include <QStandardItemModel>
 
 #include <algorithm>
+#include <limits>
 
 #include "include/sys/UrlScheme.hpp"
 #include "include/ui/mainwindow.h"
 #include "include/ui/setting/DiagnosticsTab.h"
 
+namespace {
+    constexpr int kBasicSettingsMinAutoUpdate = 30;
+    constexpr int kBasicSettingsMaxAutoUpdate = 525600;
+
+    // The test runners read a bare integer; anything else, "3s" included, becomes 0.
+    QString basicSettingsMillisError(const QString &text, int example, bool zeroIsDefault) {
+        if (const auto ms = Validation::ToInt(text); ms && *ms >= (zeroIsDefault ? 0 : 1) && *ms <= std::numeric_limits<int>::max()) return {};
+        if (zeroIsDefault)
+            return DialogBasicSettings::tr("Enter a whole number of milliseconds, for example %1 (without a unit), or 0 for the default.").arg(example);
+        return DialogBasicSettings::tr("Enter a whole number of milliseconds, for example %1 (without a unit).").arg(example);
+    }
+
+    // GroupUpdater sends only values below 1000 characters without line breaks, and silently falls back otherwise.
+    QString basicSettingsHeaderValueError(const QString &text) {
+        if (text.size() < 1000 && !text.contains(QLatin1Char('\n')) && !text.contains(QLatin1Char('\r'))) return {};
+        return DialogBasicSettings::tr("Must be shorter than 1000 characters, on a single line.");
+    }
+
+    // The keys GroupUpdater's applyCustomHwidParams reads; it skips anything else without a word.
+    QString basicSettingsHwidParamsError(const QString &text) {
+        static const QStringList keys = {QStringLiteral("hwid"), QStringLiteral("os"), QStringLiteral("osversion"), QStringLiteral("model")};
+        for (const auto &item : Validation::Items(text, Validation::Split::Comma)) {
+            const auto eq = item.indexOf(QLatin1Char('='));
+            const auto value = eq > 0 ? item.mid(eq + 1).trimmed() : QString();
+            if (eq > 0 && keys.contains(item.left(eq).trimmed().toLower()) && !value.isEmpty() && basicSettingsHeaderValueError(value).isEmpty())
+                continue;
+            return DialogBasicSettings::tr("Unknown or malformed parameter \"%1\". Use hwid=…, os=…, osVersion=…, model=… separated by commas.")
+                .arg(item.size() > 40 ? item.left(39) + QChar(0x2026) : item);
+        }
+        return {};
+    }
+
+    // Same per-line wording as Validation::Form::bindLines, which takes only a QPlainTextEdit.
+    QString basicSettingsRegexLinesError(const QString &text) {
+        const auto lines = text.split(QLatin1Char('\n'));
+        QString first;
+        int bad = 0;
+        for (qsizetype i = 0; i < lines.size(); ++i) {
+            const auto line = lines[i].trimmed();
+            const auto problem = Validation::Regex(line);
+            if (problem.isEmpty()) continue;
+            if (bad++ == 0) {
+                first = QCoreApplication::translate("Validation", "Line %1 (\"%2\"): %3")
+                            .arg(QString::number(i + 1), line.size() > 40 ? line.left(39) + QChar(0x2026) : line, problem);
+            }
+        }
+        if (bad > 1) first += QLatin1Char(' ') + QCoreApplication::translate("Validation", "%n more line(s) have problems.", nullptr, bad - 1);
+        return first;
+    }
+
+    // Underlines the lines that do not compile; extra selections stay off the undo stack.
+    void basicSettingsMarkRegexLines(QTextEdit *edit) {
+        QList<QTextEdit::ExtraSelection> selections;
+        QTextCharFormat format;
+        format.setUnderlineStyle(QTextCharFormat::WaveUnderline);
+        format.setUnderlineColor(themeManager()->tokens.danger.isValid() ? themeManager()->tokens.danger : QColor(Qt::red));
+        for (QTextBlock block = edit->document()->begin(); block.isValid(); block = block.next()) {
+            if (Validation::Regex(block.text()).isEmpty()) continue;
+            QTextEdit::ExtraSelection selection;
+            selection.cursor = QTextCursor(block);
+            selection.cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+            selection.format = format;
+            selections.append(selection);
+        }
+        edit->setExtraSelections(selections);
+    }
+}
+
 DialogBasicSettings::DialogBasicSettings(QWidget *parent)
     : QDialog(parent), ui(new Ui::DialogBasicSettings) {
     ui->setupUi(this);
+    form = new Validation::Form(this);
+    form->attachStatus(ui->buttonBox);
     ADD_ASTERISK(this);
 
     ui->inbound_socks_port_l->setText(ui->inbound_socks_port_l->text().replace("Socks", "Mixed (SOCKS+HTTP)"));
@@ -140,9 +211,6 @@ DialogBasicSettings::DialogBasicSettings(QWidget *parent)
     ui->log_include_regex->setText(Configs::dataManager->settingsRepo->log_include_regex.join("\n"));
     ui->log_exclude_regex->setText(Configs::dataManager->settingsRepo->log_exclude_regex.join("\n"));
     applyRegexHighlighting();
-
-    connect(ui->log_include_regex, &QTextEdit::textChanged, this, [this] { applyRegexHighlighting(); });
-    connect(ui->log_exclude_regex, &QTextEdit::textChanged, this, [this] { applyRegexHighlighting(); });
 
     ui->connection_statistics->setChecked(Configs::dataManager->settingsRepo->enable_stats);
     ui->disable_traffic_aggregation->setChecked(Configs::dataManager->settingsRepo->disable_traffic_aggregation);
@@ -256,6 +324,7 @@ DialogBasicSettings::DialogBasicSettings(QWidget *parent)
     ui->dns_in_port->setText(Int2String(Configs::dataManager->settingsRepo->core_dns_in_port));
 
     ui->core_box_clash_listen_addr->setText(Configs::dataManager->settingsRepo->core_box_clash_listen_addr);
+    ui->core_box_clash_listen_addr->setPlaceholderText(tr("127.0.0.1 (default)"));
     ui->core_box_clash_api->setValidator(new QIntValidator(1, 65535, ui->core_box_clash_api));
     ui->core_box_clash_api->setText(Configs::dataManager->settingsRepo->core_box_clash_api > 0
                                         ? Int2String(Configs::dataManager->settingsRepo->core_box_clash_api)
@@ -316,6 +385,7 @@ DialogBasicSettings::DialogBasicSettings(QWidget *parent)
     D_LOAD_BOOL(skip_cert)
 
     ui->tabWidget->addTab(new DiagnosticsTab(ui->tabWidget), tr("Diagnostics"));
+    bindValidation();
 
     // The .ui geometry underruns real font metrics/translations and Qt then overlaps the rows (#1671).
     QSize want = sizeHint();
@@ -330,27 +400,79 @@ DialogBasicSettings::~DialogBasicSettings() {
     delete ui;
 }
 
-static void highlightRegexLines(QTextEdit *edit) {
-    if (!edit || !edit->document()) return;
-    edit->blockSignals(true);
-    QTextDocument *doc = edit->document();
-    QRegularExpression validator;
-    for (int i = 0; i < doc->blockCount(); ++i) {
-        QTextBlock block = doc->findBlockByNumber(i);
-        QString line = block.text();
-        QTextBlockFormat fmt = block.blockFormat();
-        if (line.trimmed().isEmpty()) {
-            fmt.setBackground(Qt::NoBrush);
-            QTextCursor cur(block);
-            cur.setBlockFormat(fmt);
-            continue;
+void DialogBasicSettings::bindValidation() {
+    using namespace Validation;
+    const QStringList http = {QStringLiteral("http"), QStringLiteral("https")};
+    const auto refreshOn = [this](QAbstractButton *toggle) { connect(toggle, &QAbstractButton::toggled, form, [this] { form->refresh(); }); };
+
+    form->bind(ui->inbound_address, Rules::Ip());
+    form->bind(ui->inbound_socks_port, Rules::Port());
+    // Only the URL test treats 0 as its default; the download/upload test would time out at once.
+    form->bind(ui->test_timeout, [](const QString &text) { return basicSettingsMillisError(text, 5000, false); }).label(tr("Speed test timeout"));
+    form->bind(ui->simple_down_url, Rules::Url(http, Empty::Required)).label(ui->label_16->text())
+        .when([this] { return ui->speedtest_mode->currentIndex() == 3; });
+    connect(ui->speedtest_mode, &QComboBox::currentIndexChanged, form, [this] { form->refresh(); });
+    form->bind(ui->test_latency_url, Rules::Url(http, Empty::Required)).label(ui->label_13->text());
+    form->bind(ui->direct_test_url, Rules::Url(http)).label(ui->label_direct_test_url->text());
+    form->bind(ui->test_concurrent, Rules::Int(0, 499, Empty::Required)).label(ui->label_14->text());
+    form->bind(ui->url_timeout, [](const QString &text) { return basicSettingsMillisError(text, 3000, true); }).label(tr("URL test timeout"));
+
+    struct PortUse {
+        QLineEdit *edit;
+        QString name;
+        std::function<bool()> used;
+    };
+    const QList<PortUse> ports = {
+        {ui->inbound_socks_port, tr("Mixed inbound"),
+         [this] { return !ui->disable_mixed_inbound->isChecked() && !ui->random_listen_port->isChecked(); }},
+        {ui->dns_in_port, tr("DNS server"), [] { return true; }},
+        {ui->core_box_clash_api, tr("Clash API"), [this] { return !ui->core_box_clash_api->text().trimmed().isEmpty(); }},
+        {ui->core_box_api_port, tr("sing-box API"), [this] { return !ui->core_box_api_port->text().trimmed().isEmpty(); }},
+    };
+    for (qsizetype i = 0; i < ports.size(); ++i) {
+        for (qsizetype j = i + 1; j < ports.size(); ++j) {
+            form->addRule({ports[i].edit, ports[j].edit}, [a = ports[i], b = ports[j]] {
+                if (!a.used() || !b.used()) return QString();
+                const auto port = ToInt(a.edit->text());
+                if (!port || *port <= 0 || port != ToInt(b.edit->text())) return QString();
+                return tr("Port %1 is already used by: %2. Choose a different port.").arg(QString::number(*port), b.name);
+            }, nullptr, Severity::Error, ports[i].name);
         }
-        validator.setPattern(line);
-        fmt.setBackground(QBrush(validator.isValid() ? Qt::darkGreen : Qt::darkRed));
-        QTextCursor cur(block);
-        cur.setBlockFormat(fmt);
     }
-    edit->blockSignals(false);
+    refreshOn(ui->disable_mixed_inbound);
+    refreshOn(ui->random_listen_port);
+
+    form->bind(ui->max_log_line, Rules::Int(1, std::numeric_limits<int>::max(), Empty::Required)).label(ui->label_17->text());
+    for (QTextEdit *edit : {static_cast<QTextEdit *>(ui->log_include_regex), static_cast<QTextEdit *>(ui->log_exclude_regex)})
+        form->addRule({edit}, [edit] {
+            basicSettingsMarkRegexLines(edit);
+            return basicSettingsRegexLinesError(edit->toPlainText());
+        });
+
+    form->bind(ui->user_agent, [](const QString &text) { return basicSettingsHeaderValueError(text); });
+    form->bind(ui->sub_custom_hwid_params, [](const QString &text) { return basicSettingsHwidParamsError(text); });
+    form->bind(ui->sub_auto_update, Rules::Int(kBasicSettingsMinAutoUpdate, kBasicSettingsMaxAutoUpdate, Empty::Required))
+        .when([this] { return ui->sub_auto_update_enable->isChecked(); });
+    form->bind(ui->route_auto_update, Rules::Int(kBasicSettingsMinAutoUpdate, kBasicSettingsMaxAutoUpdate, Empty::Required))
+        .when([this] { return ui->route_auto_update_enable->isChecked(); });
+    refreshOn(ui->sub_auto_update_enable);
+    refreshOn(ui->route_auto_update_enable);
+
+    form->bind(ui->dns_in_port, Rules::Port());
+    const auto clashLabel = [this](const QLabel *label) { return QStringLiteral("%1 %2").arg(ui->clash_api_box->title(), label->text()); };
+    form->bind(ui->core_box_clash_listen_addr, Rules::Host(Empty::Allowed)).label(clashLabel(ui->core_box_clash_listen_addr_l));
+    form->bind(ui->core_box_clash_api, Rules::Port(Empty::Allowed)).label(clashLabel(ui->core_box_clash_api_l));
+    form->bind(ui->core_box_api_port, Rules::Port(Empty::Allowed))
+        .label(QStringLiteral("%1 %2").arg(ui->api_service_box->title(), ui->core_box_api_port_l->text()));
+
+    form->bind(ui->ntp_server, Rules::Host(Empty::Allowed)).label(tr("NTP server"));
+    // The core turns port 0 into 123.
+    form->bind(ui->ntp_port, [](const QString &text) { return ToInt(text) == 0 ? QString() : Port(text, Empty::Allowed); }).label(tr("NTP port"));
+
+    form->bind(ui->xray_geoip_url, Rules::Url(http)).label(ui->label_xray_geoip_url->text());
+    form->bind(ui->xray_geosite_url, Rules::Url(http)).label(ui->label_xray_geosite_url->text());
+
+    form->markAll();
 }
 
 void DialogBasicSettings::refreshUrlSchemeStatus() {
@@ -370,14 +492,15 @@ void DialogBasicSettings::refreshUrlSchemeStatus() {
 }
 
 void DialogBasicSettings::applyRegexHighlighting() {
-    highlightRegexLines(ui->log_include_regex);
-    highlightRegexLines(ui->log_exclude_regex);
+    basicSettingsMarkRegexLines(ui->log_include_regex);
+    basicSettingsMarkRegexLines(ui->log_exclude_regex);
 }
 
 void DialogBasicSettings::accept() {
+    if (!form->validateAll()) return;
     bool needChoosePort = false;
 
-    D_SAVE_STRING(inbound_address)
+    Configs::dataManager->settingsRepo->inbound_address = ui->inbound_address->text().trimmed();
     Configs::dataManager->settingsRepo->custom_inbound = CACHE.custom_inbound;
     D_SAVE_INT(inbound_socks_port)
     if (!Configs::dataManager->settingsRepo->random_inbound_port && ui->random_listen_port->isChecked())
@@ -386,7 +509,7 @@ void DialogBasicSettings::accept() {
     }
     Configs::dataManager->settingsRepo->random_inbound_port = ui->random_listen_port->isChecked();
     D_SAVE_INT(test_concurrent)
-    D_SAVE_STRING(test_latency_url)
+    Configs::dataManager->settingsRepo->test_latency_url = ui->test_latency_url->text().trimmed();
     Configs::dataManager->settingsRepo->direct_test_url = ui->direct_test_url->text().trimmed();
     D_SAVE_BOOL(disable_tray)
     Configs::dataManager->settingsRepo->proxy_scheme = ui->proxy_scheme->currentText().toLower();
@@ -418,15 +541,8 @@ void DialogBasicSettings::accept() {
     Configs::dataManager->settingsRepo->log_include_keyword = SplitAndTrim(ui->log_include_keyword->toPlainText(), "\n", false);
     Configs::dataManager->settingsRepo->log_exclude_keyword = SplitAndTrim(ui->log_exclude_keyword->toPlainText(), "\n", false);
 
-    Configs::dataManager->settingsRepo->log_include_regex.clear();
-    Configs::dataManager->settingsRepo->log_exclude_regex.clear();
-    QRegularExpression regexValidator;
-    for (QStringList log_include_lines = SplitAndTrim(ui->log_include_regex->toPlainText(), "\n", false); const QString &line : log_include_lines) {
-        if (regexValidator.setPattern(line); regexValidator.isValid()) Configs::dataManager->settingsRepo->log_include_regex << line;
-    }
-    for (QStringList log_exclude_lines = SplitAndTrim(ui->log_exclude_regex->toPlainText(), "\n", false); const QString &line : log_exclude_lines) {
-        if (regexValidator.setPattern(line); regexValidator.isValid()) Configs::dataManager->settingsRepo->log_exclude_regex << line;
-    }
+    Configs::dataManager->settingsRepo->log_include_regex = SplitAndTrim(ui->log_include_regex->toPlainText(), "\n", false);
+    Configs::dataManager->settingsRepo->log_exclude_regex = SplitAndTrim(ui->log_exclude_regex->toPlainText(), "\n", false);
 
     Configs::dataManager->settingsRepo->enable_stats = ui->connection_statistics->isChecked();
     Configs::dataManager->settingsRepo->disable_traffic_aggregation = ui->disable_traffic_aggregation->isChecked();
@@ -452,10 +568,6 @@ void DialogBasicSettings::accept() {
     Configs::dataManager->settingsRepo->log_font_family = logFontFamily;
     Configs::dataManager->settingsRepo->log_font_size = logFontSize;
 
-    if (Configs::dataManager->settingsRepo->max_log_line <= 0) {
-        Configs::dataManager->settingsRepo->max_log_line = 500;
-    }
-
     // The PeriodicRunner reads these intervals live; no timer needs restarting.
 
     Configs::dataManager->settingsRepo->user_agent = ui->user_agent->text().trimmed();
@@ -467,7 +579,7 @@ void DialogBasicSettings::accept() {
     D_SAVE_BOOL(sub_show_change_popup)
     D_SAVE_BOOL(net_insecure)
     D_SAVE_BOOL(sub_send_hwid)
-    D_SAVE_STRING(sub_custom_hwid_params)
+    Configs::dataManager->settingsRepo->sub_custom_hwid_params = ui->sub_custom_hwid_params->text().trimmed();
     D_SAVE_INT_ENABLE(sub_auto_update, sub_auto_update_enable)
     D_SAVE_BOOL(sub_respect_server_interval)
     D_SAVE_INT_ENABLE(route_auto_update, route_auto_update_enable)
@@ -483,8 +595,13 @@ void DialogBasicSettings::accept() {
         Configs::dataManager->settingsRepo->core_box_api_secret = secret;
 
     Configs::dataManager->settingsRepo->xray_vless_preference = static_cast<Configs::Xray::XrayVlessPreference>(ui->vless_xray_pref->currentIndex());
-    Configs::dataManager->settingsRepo->xray_geoip_url = ui->xray_geoip_url->currentText().trimmed();
-    Configs::dataManager->settingsRepo->xray_geosite_url = ui->xray_geosite_url->currentText().trimmed();
+    // An empty field means the provider shown as its placeholder; the download at profile start has no fallback of its own.
+    const auto geoAssetUrl = [](const QComboBox *combo) {
+        const auto url = combo->currentText().trimmed();
+        return url.isEmpty() ? combo->lineEdit()->placeholderText() : url;
+    };
+    Configs::dataManager->settingsRepo->xray_geoip_url = geoAssetUrl(ui->xray_geoip_url);
+    Configs::dataManager->settingsRepo->xray_geosite_url = geoAssetUrl(ui->xray_geosite_url);
 
     Configs::dataManager->settingsRepo->enable_ntp = ui->ntp_enable->isChecked();
     Configs::dataManager->settingsRepo->ntp_server_address = ui->ntp_server->text().trimmed();

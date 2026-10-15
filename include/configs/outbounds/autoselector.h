@@ -5,10 +5,22 @@
 
 namespace Configs
 {
+    namespace Checks {
+        QString AutoSelectorCountries(const QString &text);
+        QString AutoSelectorUrl(const QString &text);
+        QString AutoSelectorBuildLimit(int buildLimit, int poolCap);
+        QString AutoSelectorBenchInterval(int benchInterval, int interval);
+        QString AutoSelectorWatchInterval(int watchInterval, int interval);
+        QString AutoSelectorReadyCount(int activeSize, int expected);
+        QString AutoSelectorCloseCount(int activeSize, int buildLimit);
+    }
+
     // Membership resolves at build time from gid; ranking is client-side, best first in pool.
     class autoSelector : public outbound
     {
     public:
+        bool HasServerEndpoint() override { return false; }
+
         int gid = -1;
         QString nameFilter;             // regex over the profile name, empty = all
         QString countryFilter;          // comma-separated ISO codes, empty = all
@@ -57,6 +69,9 @@ namespace Configs
 
         // No security of its own; it inherits whatever its members use.
         SecurityInfo GetSecurity() override { return {}; }
+
+        // ParseFromJson() already ran Normalize(), so only the free-text fields can be wrong here.
+        void Validate(Validation::Issues &issues) override;
 
         bool ParseFromJson(const QJsonObject &object) override
         {

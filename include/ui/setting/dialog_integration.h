@@ -10,6 +10,10 @@ namespace Ui {
 }
 QT_END_NAMESPACE
 
+namespace Validation {
+    class Form;
+}
+
 class DialogIntegration : public QDialog {
     Q_OBJECT
 
@@ -26,6 +30,8 @@ public slots:
 private:
     void generateShortcutItems(const QList<QAction*>& actions);
 
+    void bindHotkeyValidation();
+
     void setupApiTab();
 
     void updateApiControls();
@@ -34,9 +40,15 @@ private:
 
     void copyForScripts();
 
-    static bool isValidAllowEntry(const QString &entry);
+    struct HotkeyEdit {
+        QtExtKeySequenceEdit *edit = nullptr;
+        QString label;
+        bool global = false;
+    };
 
     QMap<QtExtKeySequenceEdit*, QString> seqEdit2ID;
+    QList<HotkeyEdit> hotkeyEdits;
+    Validation::Form *form = nullptr;
     QString savedApiKey;
     Ui::DialogIntegration *ui;
 };

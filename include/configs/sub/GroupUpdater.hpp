@@ -9,6 +9,7 @@
 #include <QStringList>
 
 #include <functional>
+#include <memory>
 
 #include "include/database/entities/Group.h"
 #include "include/global/DeviceDetailsHelper.hpp"
@@ -34,8 +35,12 @@ namespace Subscription {
         // Must return at once; done may fire on any thread.
         using UrlTester = std::function<void(const QList<int> &profileIDs, const Finish &done)>;
 
+        // Where an update's problems go: the log only (automatic), the diff popup (manual refresh), or a report box (a new subscription's first update).
+        enum class Surface { Log, Diff, Report };
+
         // showDiff: a manual refresh pops up the diff; automatic paths leave it false and only log.
         void RefreshGroup(int gid, const Finish &finish = nullptr, bool showDiff = false);
+        void RefreshGroup(int gid, const Finish &finish, Surface surface);
 
         void RefreshAll(bool onlyAllowed = false);
 
@@ -66,16 +71,22 @@ namespace Subscription {
             int gid = -1;
             bool batch = false;
             std::function<void()> run;
+            // Runs after run() even when it throws.
+            Finish finish;
         };
 
         void enqueue(Job job);
         void enqueueLocked(Job job);
         void drain();
-        void refresh(int gid, bool showDiff);
+        void refresh(int gid, Surface surface);
+        void applyRefresh(const std::shared_ptr<Configs::Group> &group, const QString &url, QByteArray body,
+                          const Configs::SubUserInfo &subInfo, Surface surface);
         void requestUrlTest(int gid, const QList<int> &profileIDs);
         void afterUrlTest(int gid);
-        void importDocuments(int gid, QList<QByteArray> documents);
-        bool fetch(const QString &url, const QString &name, const RequestIdentity &identity, QByteArray &body, Configs::SubUserInfo &subInfo);
+        // emptyReason replaces the generic "nothing found" when no profile is imported.
+        void importDocuments(int gid, QList<QByteArray> documents, const QString &emptyReason = {});
+        bool fetch(const QString &url, const QString &name, const RequestIdentity &identity, QByteArray &body,
+                   Configs::SubUserInfo &subInfo, QString *error = nullptr);
         [[nodiscard]] qint64 autoUpdateDue(const Configs::Group &group, qint64 interval) const;
 
         // UI thread only: in-memory, so a restart retries a failing group once.

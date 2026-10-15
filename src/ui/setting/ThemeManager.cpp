@@ -231,6 +231,15 @@ static QString overlayStyleSheet(const ThemeTokens &t) {
         "*[colorRole=\"tag\"] { color: %2; }\n"
         "*[colorRole=\"danger\"] { color: %3; }\n"
         "*[colorRole=\"success\"] { color: %4; }\n"
+        // Colour only: any border rule makes QStyleSheetStyle replace the native frame.
+        "QLineEdit[invalid=\"true\"], QLineEdit[invalid=\"true\"]:focus, QLineEdit[invalid=\"true\"]:hover,\n"
+        "QPlainTextEdit[invalid=\"true\"], QTextEdit[invalid=\"true\"],\n"
+        "QAbstractSpinBox[invalid=\"true\"], QAbstractSpinBox[invalid=\"true\"]:focus, QAbstractSpinBox[invalid=\"true\"]:hover { color: %3; }\n"
+        // A menu-style popup paints its items under the combo's rule, as :active and never :editable or :read-only.
+        "QComboBox[invalid=\"true\"]:editable, QComboBox[invalid=\"true\"]:editable:focus, QComboBox[invalid=\"true\"]:editable:hover,\n"
+        "QComboBox[invalid=\"true\"]:read-only, QComboBox[invalid=\"true\"]:read-only:focus, QComboBox[invalid=\"true\"]:read-only:hover,\n"
+        // Qt polishes a non-editable combo's inactive palette without :read-only.
+        "QComboBox[invalid=\"true\"]:!editable:!active { color: %3; }\n"
     ).arg(hex(t.muted), hex(t.tag), hex(t.danger), hex(t.success));
 #ifdef Q_OS_MACOS
     // QMacStyle centres non-document tabs and elides them instead of scrolling.

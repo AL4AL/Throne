@@ -7,6 +7,7 @@
 
 #include "include/global/Configs.hpp"
 #include "include/ui/setting/RouteItem.h"
+#include "include/ui/utils/ValidationForm.h"
 #include "ui_dialog_manage_routes.h"
 #include "include/database/entities/RouteProfile.h"
 
@@ -26,6 +27,8 @@ public:
 
 private:
     Ui::DialogManageRoutes *ui;
+
+    Validation::Form* form = nullptr;
 
     RouteItem* routeChainWidget;
 

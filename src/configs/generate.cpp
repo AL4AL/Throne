@@ -250,6 +250,37 @@ namespace Configs {
             return res;
         }
 
+        bool isCanonicalDecimal(const QString &text, int maxDigits) {
+            if (text.isEmpty() || text.size() > maxDigits) return false;
+            if (text.size() > 1 && text.startsWith(u'0')) return false;
+            return std::all_of(text.cbegin(), text.cend(), [](QChar c) { return c.unicode() >= '0' && c.unicode() <= '9'; });
+        }
+
+        // Go netip: QHostAddress also takes "10.1" or "010.0.0.1", which the core refuses.
+        bool isCanonicalIPv4(const QString &text) {
+            const auto octets = text.split(u'.');
+            return octets.size() == 4 && std::all_of(octets.cbegin(), octets.cend(),
+                [](const QString &octet) { return isCanonicalDecimal(octet, 3) && octet.toInt() <= 255; });
+        }
+
+        bool isIPv6Literal(const QString &text, bool allowZone) {
+            if (!text.contains(u':') || (!allowZone && text.contains(u'%'))) return false;
+            return QHostAddress(text).protocol() == QAbstractSocket::IPv6Protocol;
+        }
+
+        // The core decodes route_exclude_address as netip.Prefix, so a bare address gets its full length; empty when unparsable.
+        QString routeExcludePrefix(const QString &range) {
+            const auto text = range.trimmed();
+            const auto slash = text.indexOf(u'/');
+            const auto addr = slash < 0 ? text : text.left(slash);
+            const int maxBits = isCanonicalIPv4(addr) ? 32 : isIPv6Literal(addr, false) ? 128 : -1;
+            if (maxBits < 0) return {};
+            if (slash < 0) return addr + "/" + QString::number(maxBits);
+            const auto bits = text.mid(slash + 1);
+            if (!isCanonicalDecimal(bits, 3) || bits.toInt() > maxBits) return {};
+            return text;
+        }
+
         bool prefixesOverlap(const QString &lhs, const QString &rhs) {
             const auto a = QHostAddress::parseSubnet(lhs);
             const auto b = QHostAddress::parseSubnet(rhs);
@@ -819,7 +850,13 @@ namespace Configs {
             if (!settings.disable_private_range_bypass) {
                 const auto hijackedIPs = routeChain->get_hijacked_ips();
                 // sing-tun keeps an excluded range out of the Tun entirely, so a rule aimed at one never fires (#1741).
-                for (const auto &range : settings.vpn_private_ranges) {
+                for (const auto &saved : settings.vpn_private_ranges) {
+                    if (saved.trimmed().isEmpty()) continue;
+                    const auto range = routeExcludePrefix(saved);
+                    if (range.isEmpty()) {
+                        if (ctx.tunEnabled) MW_show_log(QObject::tr("Skipped the Tun private range \"%1\": it is not a valid IP address or CIDR.").arg(saved.trimmed()));
+                        continue;
+                    }
                     const bool hijacked = std::any_of(hijackedIPs.cbegin(), hijackedIPs.cend(),
                         [&range](const QString &cidr) { return prefixesOverlap(range, cidr); });
                     if (!hijacked) preReqs.tun.bypassedPrivateRanges << range;
@@ -874,14 +911,8 @@ namespace Configs {
             return {{"server", tags::dnsDirect}, {"strategy", getDirectDomainStrategy()}};
         }
 
-        QJsonObject buildDnsObj(BuildContext &ctx, QString address) {
-            if (address.startsWith("local")) {
-                // A probe box outlives Tun toggles, and its `local` would follow resolved's `~.` into a running tun (#1975).
-                if (ctx.isResolvedUsed && (ctx.tunEnabled || ctx.forTest)) {
-                    return {{"type", "underlying"}};
-                }
-                return {{"type", "local"}};
-            }
+        // The pre-ParseDnsAddress split, kept for refused addresses so a saved value builds as it always did.
+        QJsonObject legacyDnsObj(QString address) {
             if (address.startsWith("dhcp://")) {
                 auto ifcName = address.replace("dhcp://", "");
                 if (ifcName == "auto") ifcName = "";
@@ -936,6 +967,36 @@ namespace Configs {
             };
             if (port != -1) res["server_port"] = port;
             if (!path.isEmpty()) res["path"] = path;
+            return res;
+        }
+
+        QJsonObject buildDnsObj(BuildContext &ctx, const QString &address) {
+            DnsAddress parsed;
+            QString why;
+            if (!ParseDnsAddress(address, &parsed, &why)) {
+                // Reported by real builds only: test builds repeat for every probe batch.
+                if (!ctx.forTest) MW_show_log(QObject::tr("DNS address \"%1\" is invalid: %2").arg(address, why));
+                return legacyDnsObj(address);
+            }
+            if (parsed.type == "local") {
+                // A probe box outlives Tun toggles, and its `local` would follow resolved's `~.` into a running tun (#1975).
+                if (ctx.isResolvedUsed && (ctx.tunEnabled || ctx.forTest)) {
+                    return {{"type", "underlying"}};
+                }
+                return {{"type", "local"}};
+            }
+            if (parsed.type == "dhcp") {
+                return {
+                    {"type", "dhcp"},
+                    {"interface", parsed.iface},
+                };
+            }
+            QJsonObject res = {
+                {"type", parsed.type},
+                {"server", parsed.server},
+            };
+            if (parsed.port > 0) res["server_port"] = parsed.port;
+            if (!parsed.path.isEmpty()) res["path"] = parsed.path;
             return res;
         }
 
@@ -1247,7 +1308,12 @@ namespace Configs {
                 if (tun.privateRangesAsRuleSet) routeExcludeSets << tags::privateRangesRuleSet;
                 if (settings.enable_tun_routing)
                 {
-                    for (auto item: tun.directIPCIDRs) excludedRanges << item.toString();
+                    // The route rule drops a bare IPv6's zone (Prefixable), so the exclusion must too; anything unparsable fails that rule anyway.
+                    for (const auto &item: tun.directIPCIDRs) {
+                        auto text = item.toString().trimmed();
+                        if (const auto zone = text.indexOf(u'%'); zone > 0 && text.left(zone).contains(u':') && !text.contains(u'/')) text.truncate(zone);
+                        if (const auto prefix = routeExcludePrefix(text); !prefix.isEmpty()) excludedRanges << prefix;
+                    }
                     for (auto item: tun.directIPSets) routeExcludeSets << item;
                 }
 
@@ -1395,15 +1461,13 @@ namespace Configs {
         bool resolvesHostnamesViaDnsRules(const Profile &hop) {
             if (hop.outbound->IsEndpoint()) return true;
             const auto *socksOutbound = hop.Socks();
-            return socksOutbound != nullptr && socksOutbound->version == 4;
+            return socksOutbound != nullptr && socksOutbound->version == 4 && !socksOutbound->socks4a;
         }
 
-        // A resolver buildDnsObj cannot express falls back to dns-direct like an unset one.
+        // A resolver ParseDnsAddress refuses, or a dhcp one, falls back to dns-direct like an unset one.
         bool usableEchResolver(const QString &resolver) {
-            if (resolver.isEmpty()) return false;
-            if (!resolver.contains("://")) return true;
-            static const QStringList schemes = {"udp", "tcp", "tls", "https", "quic", "h3"};
-            return schemes.contains(resolver.section("://", 0, 0).toLower());
+            DnsAddress parsed;
+            return ParseDnsAddress(resolver, &parsed) && parsed.type != "dhcp";
         }
 
         // Without a static config the core fetches the ECH list over DNS first; via dns-remote that dials the same hop.
@@ -1498,14 +1562,7 @@ namespace Configs {
                 }
                 object["tag"] = tag;
                 // Xray removed outbound-level proxySettings; sockopt.dialerProxy is its 1:1 replacement.
-                if (!nextTag.isEmpty() && (opts.link || bridgeConfig.needed))
-                {
-                    auto streamObj = object["streamSettings"].toObject();
-                    auto sockoptObj = streamObj["sockopt"].toObject();
-                    sockoptObj["dialerProxy"] = nextTag;
-                    streamObj["sockopt"] = sockoptObj;
-                    object["streamSettings"] = streamObj;
-                }
+                if (!nextTag.isEmpty() && (opts.link || bridgeConfig.needed)) SetXrayDialerProxy(object, nextTag);
                 ctx.xrayOutbounds.append(object);
             }
             if (bridgeConfig.needed) {
@@ -2273,8 +2330,12 @@ namespace Configs {
             QJsonObject experimentalObj;
             // Only the yacd listener now; the stats tracker comes from buildServicesSection.
             if (settings.core_box_clash_api > 0) {
+                // An empty host would listen on every interface.
+                QString listenHost = settings.core_box_clash_listen_addr.trimmed();
+                if (listenHost.isEmpty()) listenHost = "127.0.0.1";
+                else if (isIPv6Literal(listenHost, true)) listenHost = "[" + listenHost + "]";
                 experimentalObj["clash_api"] = QJsonObject{
-                    {"external_controller", settings.core_box_clash_listen_addr + ":" + Int2String(settings.core_box_clash_api)},
+                    {"external_controller", listenHost + ":" + Int2String(settings.core_box_clash_api)},
                     {"secret", settings.core_box_clash_api_secret},
                     {"external_ui", "dashboard"},
                 };
@@ -2507,8 +2568,102 @@ namespace Configs {
     }
 
     bool IsValidDuration(const QString& text) {
-        static const QRegularExpression re(R"(^(?:\d+(?:\.\d+)?(?:ns|us|ms|s|m|h|d))+$)");
-        return re.match(text).hasMatch();
+        return Validation::Duration(text, {Validation::Empty::Required}).isEmpty();
+    }
+
+    bool ParseDnsAddress(const QString &text, DnsAddress *out, QString *why) {
+        const auto fail = [why](const QString &reason) {
+            if (why != nullptr) *why = reason;
+            return false;
+        };
+        const QString address = text.trimmed();
+        if (address.isEmpty()) return fail(QCoreApplication::translate("Validation", "The DNS address is empty."));
+
+        DnsAddress res;
+        if (address.startsWith("local", Qt::CaseInsensitive)) {
+            res.type = "local";
+            if (out != nullptr) *out = res;
+            return true;
+        }
+
+        const auto schemeEnd = address.indexOf("://");
+        const QString scheme = schemeEnd < 0 ? QString("udp") : address.left(schemeEnd).toLower();
+        QString rest = schemeEnd < 0 ? address : address.mid(schemeEnd + 3);
+
+        if (scheme == "dhcp") {
+            static const QRegularExpression ifaceRe(R"(^[^\s/]+$)");
+            if (rest.isEmpty())
+                return fail(QCoreApplication::translate("Validation", "Name an interface after dhcp://, or use dhcp://auto."));
+            if (!ifaceRe.match(rest).hasMatch())
+                return fail(QCoreApplication::translate("Validation", "\"%1\" is not a valid interface name.").arg(rest));
+            res.type = "dhcp";
+            if (rest.compare("auto", Qt::CaseInsensitive) != 0) res.iface = rest;
+            if (out != nullptr) *out = res;
+            return true;
+        }
+
+        static const QStringList plainSchemes = {"udp", "tcp", "tls", "quic"};
+        static const QStringList pathSchemes = {"https", "h3"};
+        if (!plainSchemes.contains(scheme) && !pathSchemes.contains(scheme))
+            return fail(QCoreApplication::translate("Validation", "\"%1\" is not a supported DNS scheme; use udp, tcp, tls, quic, https, h3, dhcp or local.").arg(scheme));
+        res.type = scheme;
+
+        if (const auto slash = rest.indexOf(u'/'); slash >= 0) {
+            if (!pathSchemes.contains(scheme))
+                return fail(QCoreApplication::translate("Validation", "Only https:// and h3:// DNS addresses take a path."));
+            res.path = rest.mid(slash);
+            rest.truncate(slash);
+        }
+
+        QString host = rest;
+        QString portText;
+        bool hasPort = false;
+        if (rest.startsWith(u'[')) {
+            const auto close = rest.indexOf(u']');
+            if (close < 0) return fail(QCoreApplication::translate("Validation", "The IPv6 address is missing its closing bracket."));
+            host = rest.mid(1, close - 1);
+            const auto tail = rest.mid(close + 1);
+            if (!tail.isEmpty()) {
+                if (!tail.startsWith(u':'))
+                    return fail(QCoreApplication::translate("Validation", "Only a port may follow a bracketed IPv6 address."));
+                portText = tail.mid(1);
+                hasPort = true;
+            }
+            if (!isIPv6Literal(host, true))
+                return fail(QCoreApplication::translate("Validation", "\"%1\" is not a valid IPv6 address.").arg(host));
+        } else if (rest.count(u':') > 1) {
+            // A bare IPv6 cannot carry a port: its last group would read as one.
+            if (!isIPv6Literal(rest, true))
+                return fail(QCoreApplication::translate("Validation", "\"%1\" is not a valid IPv6 address; put it in brackets to add a port.").arg(rest));
+        } else {
+            if (const auto colon = rest.indexOf(u':'); colon >= 0) {
+                host = rest.left(colon);
+                portText = rest.mid(colon + 1);
+                hasPort = true;
+            }
+            if (host.isEmpty()) return fail(QCoreApplication::translate("Validation", "The DNS server address is missing."));
+            static const QRegularExpression ipv4LikeRe(R"(^[0-9.]+$)");
+            static const QRegularExpression hostnameRe(
+                R"(^(?=.{1,253}\.?$)[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?(?:\.[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)*\.?$)");
+            if (ipv4LikeRe.match(host).hasMatch()) {
+                if (!isCanonicalIPv4(host))
+                    return fail(QCoreApplication::translate("Validation", "\"%1\" is not a valid IPv4 address.").arg(host));
+            } else if (!hostnameRe.match(toAceHost(host)).hasMatch()) {
+                return fail(QCoreApplication::translate("Validation", "\"%1\" is not a valid IP address or host name.").arg(host));
+            }
+        }
+
+        if (hasPort) {
+            if (portText.isEmpty()) return fail(QCoreApplication::translate("Validation", "The port is missing after the colon."));
+            static const QRegularExpression portRe(R"(^[0-9]{1,5}$)");
+            const int port = portRe.match(portText).hasMatch() ? portText.toInt() : 0;
+            if (port < 1 || port > 65535)
+                return fail(QCoreApplication::translate("Validation", "\"%1\" is not a valid port; use a number from 1 to 65535.").arg(portText));
+            res.port = port;
+        }
+        res.server = toAceHost(host);
+        if (out != nullptr) *out = res;
+        return true;
     }
 
     std::shared_ptr<BuildConfigResult> BuildSingBoxConfig(const std::shared_ptr<Profile>& ent) {
@@ -2715,6 +2870,17 @@ namespace Configs {
         if (!fullConf)
         {
             auto out = ent->outbound->Build();
+            if (!out.error.isEmpty())
+            {
+                // A bad global fragment setting fails every fragmenting profile alike; "invalid" here would delete them all.
+                if (const auto fragmentError = FragmentSettingsError(); !fragmentError.isEmpty() && out.error == fragmentError)
+                {
+                    MW_show_log("Could not check ent " + ent->outbound->name + ": " + out.error);
+                    return true;
+                }
+                MW_show_log("Invalid ent " + ent->outbound->name + ": " + out.error);
+                return false;
+            }
             auto outArr = QJsonArray{out.object};
             auto key = ent->outbound->IsEndpoint() ? "endpoints" : "outbounds";
             conf = {
@@ -2731,6 +2897,35 @@ namespace Configs {
     }
 
     namespace {
+    // What buildOutboundChain leaves behind, so a test batch can drop a profile whose chain failed halfway.
+    struct ChainBuildMark {
+        qsizetype outbounds, endpoints, xrayOutbounds, xrayIngressTags, singIngressTags, singToXrayBridges, xrayToSingBridges,
+                  chainGroups;
+        QJsonObject xrayConfig;
+        bool isXrayNeeded;
+
+        explicit ChainBuildMark(const BuildContext &ctx)
+            : outbounds(ctx.outbounds.size()), endpoints(ctx.endpoints.size()), xrayOutbounds(ctx.xrayOutbounds.size()),
+              xrayIngressTags(ctx.xrayIngressTags.size()), singIngressTags(ctx.singIngressTags.size()),
+              singToXrayBridges(ctx.singToXrayBridges.size()), xrayToSingBridges(ctx.xrayToSingBridges.size()),
+              chainGroups(ctx.result->chainGroups.size()), xrayConfig(ctx.result->xrayConfig),
+              isXrayNeeded(ctx.result->isXrayNeeded) {}
+
+        void rollback(BuildContext &ctx) const {
+            while (ctx.outbounds.size() > outbounds) ctx.outbounds.removeLast();
+            while (ctx.endpoints.size() > endpoints) ctx.endpoints.removeLast();
+            while (ctx.xrayOutbounds.size() > xrayOutbounds) ctx.xrayOutbounds.removeLast();
+            ctx.xrayIngressTags.resize(xrayIngressTags);
+            ctx.singIngressTags.resize(singIngressTags);
+            ctx.singToXrayBridges.resize(singToXrayBridges);
+            ctx.xrayToSingBridges.resize(xrayToSingBridges);
+            ctx.result->chainGroups.resize(chainGroups);
+            ctx.result->xrayConfig = xrayConfig;
+            ctx.result->isXrayNeeded = isXrayNeeded;
+            ctx.error.clear();
+        }
+    };
+
     std::shared_ptr<BuildTestConfigResult> buildTestConfigImpl(const QList<std::shared_ptr<Profile> > &profiles,
                                                                const TestBuildOptions &options)
     {
@@ -2773,6 +2968,15 @@ namespace Configs {
         // assume all chains transition twice and allocate port for them.
         auto xrayPorts = MkManyPorts(xrayCount + 2*chainCount);
 
+        // A validated batch marks a profile that fails to build as failed and tests the rest; a scan stops at the first.
+        const auto skipFailedBuild = [&](const std::shared_ptr<Profile> &item, const ChainBuildMark &mark) {
+            if (!options.validate) return false;
+            MW_show_log(QObject::tr("Skipped testing %1: %2").arg(item->outbound->DisplayTypeAndName(), ctx.error));
+            item->SetLatency(-1);
+            mark.rollback(ctx);
+            return true;
+        };
+
         for (const auto& item : profiles)
         {
             const auto candidate = classifyTestCandidate(item);
@@ -2789,11 +2993,13 @@ namespace Configs {
                     continue;
                 }
                 // Clear the single xrayConfig slot per full config so they all share one sing-box.
+                const ChainBuildMark mark(ctx);
                 auto tag = buildOutboundChain(ctx, {
                     .hopIDs = {item->id},
                     .prefix = hopTag(tags::testXrayFullPrefix, item->id),
                 });
                 if (!ctx.error.isEmpty()) {
+                    if (skipFailedBuild(item, mark)) continue;
                     res->error = ctx.error;
                     return res;
                 }
@@ -2848,6 +3054,7 @@ namespace Configs {
                 singToXrayPort = xrayPorts[xrayPortIdx++];
                 xrayToSingPort = xrayPorts[xrayPortIdx++];
             }
+            const ChainBuildMark mark(ctx);
             auto tag = buildOutboundChain(ctx, {
                 .hopIDs = IDs,
                 .prefix = hopTag(options.chainPrefix, suffix),
@@ -2855,8 +3062,12 @@ namespace Configs {
                 .xrayToSingPort = xrayToSingPort,
             });
             if (!ctx.error.isEmpty()) {
-                res->error = ctx.error;
-                return res;
+                if (!skipFailedBuild(item, mark)) {
+                    res->error = ctx.error;
+                    return res;
+                }
+                suffix++;
+                continue;
             }
             res->outboundTags << tag;
             res->tag2entID.insert(tag, item->id);

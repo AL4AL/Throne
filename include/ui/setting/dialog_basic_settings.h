@@ -9,6 +9,10 @@ namespace Ui {
     class DialogBasicSettings;
 }
 
+namespace Validation {
+    class Form;
+}
+
 class DialogBasicSettings : public QDialog {
     Q_OBJECT
 
@@ -23,6 +27,10 @@ public slots:
 
 private:
     Ui::DialogBasicSettings *ui;
+
+    Validation::Form *form = nullptr;
+
+    void bindValidation();
 
     void applyRegexHighlighting();
 

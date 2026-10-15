@@ -95,6 +95,8 @@ set(PROJECT_SOURCES
         src/main.cpp
         src/global/Configs.cpp
         src/global/Utils.cpp
+        include/global/Validation.hpp
+        src/global/Validation.cpp
         include/global/Logger.hpp
         src/global/Logger.cpp
         include/global/PeriodicRunner.hpp
@@ -156,6 +158,10 @@ set(PROJECT_SOURCES
         include/configs/sub/SubscriptionScan.hpp
         include/configs/sub/SubscriptionParser.hpp
         src/configs/sub/SubscriptionParser.cpp
+        include/configs/sub/ImportReport.hpp
+        src/configs/sub/ImportReport.cpp
+        include/configs/ParseDiagnostics.h
+        src/configs/ParseDiagnostics.cpp
         include/configs/sub/SubscriptionReconcile.hpp
         src/configs/sub/SubscriptionReconcile.cpp
         include/configs/sub/RouteUpdater.hpp
@@ -258,6 +264,8 @@ set(PROJECT_SOURCES
         include/ui/utils/ScreenQrScanner.h
         src/ui/utils/ScreenQrScanner.cpp
         include/ui/utils/NoWheelComboBox.h
+        include/ui/utils/ValidationForm.h
+        src/ui/utils/ValidationForm.cpp
 
         include/ui/profile/dialog_edit_profile.h
         src/ui/profile/dialog_edit_profile.cpp

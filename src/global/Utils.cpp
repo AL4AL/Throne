@@ -335,6 +335,7 @@ void MessageBoxScrollable(const QString &title, const QString &text) {
 int MessageBoxCheck(const QString &title, const QString &text, const QString &checkBoxText, bool &isChecked) {
     QMessageBox msgBox(GetMessageBoxParent());
     msgBox.setWindowTitle(title);
+    msgBox.setTextFormat(Qt::PlainText);
     msgBox.setText(text);
     msgBox.setIcon(QMessageBox::Question);
     msgBox.setStandardButtons(QMessageBox::Ok | QMessageBox::Cancel);
