@@ -96,6 +96,13 @@ namespace Subscription {
             return nullptr;
         }
 
+        // The links' REALITY preference (useXrayVless), limited to the Clash networks Xray reads.
+        bool clashRealityOnXray(const clash::Proxies &out) {
+            if (!out.tls || out.reality_opts.public_key.empty()) return false;
+            if (Configs::dataManager->settingsRepo->xray_vless_preference == Configs::Xray::XhttpOnly) return false;
+            return out.network.empty() || out.network == "tcp" || out.network == "ws" || out.network == "grpc";
+        }
+
         QString toQString(std::string_view s) {
             return QString::fromUtf8(s.data(), static_cast<qsizetype>(s.size())).trimmed();
         }
@@ -522,7 +529,8 @@ namespace Subscription {
                     const char *profileType = typeForClash(out.type);
                     if (profileType == nullptr) continue;
                     ProfilePtr ent;
-                    if (out.type == "vless" && (out.network == "xhttp" || (!out.encryption.empty() && out.encryption != "none"))) {
+                    if (out.type == "vless" && (out.network == "xhttp" || (!out.encryption.empty() && out.encryption != "none")
+                                                || clashRealityOnXray(out))) {
                         ent = Configs::ProfilesRepo::NewProfile("xrayvless");
                     } else {
                         ent = Configs::ProfilesRepo::NewProfile(profileType);

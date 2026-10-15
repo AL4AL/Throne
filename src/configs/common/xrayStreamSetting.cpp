@@ -833,6 +833,7 @@ namespace Configs {
 
     bool xrayStreamSetting::ParseFromClash(const clash::Proxies& object) {
         if (!object.network.empty()) network = QString::fromStdString(object.network);
+        if (network == "tcp") network = "raw";
         if (network != "raw" && network != "ws" && network != "grpc" && network != "xhttp") return false;
         if (object.tls) {
             if (object.reality_opts.public_key.empty()) {
