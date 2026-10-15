@@ -6752,10 +6752,6 @@ Improves hole-punching reliability. Requires IPv4.</source>
         <translation>Обновить ширину колонок</translation>
     </message>
     <message>
-        <source>Export Xray config</source>
-        <translation>Экспортировать конфиг Xray</translation>
-    </message>
-    <message>
         <source>Copy Test Result</source>
         <translation>Копировать результат теста</translation>
     </message>
@@ -6956,10 +6952,6 @@ URL: %2</translation>
     <message>
         <source>Copied %1 item(s)</source>
         <translation>Скопировано %1 записей</translation>
-    </message>
-    <message>
-        <source>Config copied</source>
-        <translation>Конфигурация скопирована</translation>
     </message>
     <message>
         <source>QR Code not found</source>
@@ -7354,8 +7346,8 @@ Error: %1</source>
         <translation>Меню маршрутизации</translation>
     </message>
     <message>
-        <source>Export Sing-box config</source>
-        <translation>Экспортировать конфиг Sing-box</translation>
+        <source>Export config</source>
+        <translation>Экспортировать конфиг</translation>
     </message>
     <message>
         <source>Open Manager</source>
@@ -7418,12 +7410,12 @@ Please try again.</source>
         <translation>Ошибка остановки</translation>
     </message>
     <message>
-        <source>Copy core config</source>
-        <translation>Копировать конфигурацию ядра</translation>
+        <source>Copy</source>
+        <translation>Копировать</translation>
     </message>
     <message>
-        <source>Copy test config</source>
-        <translation>Копировать тестовую конфигурацию</translation>
+        <source>Copied</source>
+        <translation>Скопировано</translation>
     </message>
     <message>
         <source>Cannot start</source>

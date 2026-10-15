@@ -2276,10 +2276,6 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>%1 مورد کپی شد</translation>
     </message>
     <message>
-        <source>Config copied</source>
-        <translation>کانفیگ کپی شد</translation>
-    </message>
-    <message>
         <source>QR Code not found</source>
         <translation>کد QR یافت نشد</translation>
     </message>
@@ -2572,12 +2568,12 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>خطای بازگشت توقف</translation>
     </message>
     <message>
-        <source>Copy core config</source>
-        <translation>کپی پیکربندی هسته</translation>
+        <source>Copy</source>
+        <translation>کپی</translation>
     </message>
     <message>
-        <source>Copy test config</source>
-        <translation>کپی پیکربندی تست</translation>
+        <source>Copied</source>
+        <translation>کپی شد</translation>
     </message>
     <message>
         <source>Cannot start</source>
@@ -2656,6 +2652,10 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     <message>
         <source>Add profile from File(s)</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export config</source>
+        <translation>استخراج پیکربندی</translation>
     </message>
 </context>
 <context>

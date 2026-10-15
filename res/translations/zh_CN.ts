@@ -8235,9 +8235,8 @@ Improves hole-punching reliability. Requires IPv4.</source>
         <translation>清除本组测试结果</translation>
     </message>
     <message>
-        <location filename="Throne-1.3.1/include/ui/mainwindow.ui" line="926"/>
-        <source>Export Sing-box config</source>
-        <translation>导出 Sing-box 配置</translation>
+        <source>Export config</source>
+        <translation>导出配置</translation>
     </message>
     <message>
         <location filename="Throne-1.3.1/include/ui/mainwindow.ui" line="934"/>
@@ -8469,11 +8468,6 @@ Improves hole-punching reliability. Requires IPv4.</source>
         <location filename="Throne-1.3.1/include/ui/mainwindow.ui" line="1296"/>
         <source>Refresh Column Widths</source>
         <translation>刷新列宽</translation>
-    </message>
-    <message>
-        <location filename="Throne-1.3.1/include/ui/mainwindow.ui" line="1301"/>
-        <source>Export Xray config</source>
-        <translation>导出 Xray 配置</translation>
     </message>
     <message>
         <location filename="Throne-1.3.1/include/ui/mainwindow.ui" line="1306"/>
@@ -9124,22 +9118,12 @@ Error: %1</source>
         <translation>复制了 %1 项</translation>
     </message>
     <message>
-        <location filename="Throne-1.3.1/src/ui/mainWindow/mainwindow_profiles.cpp" line="193"/>
-        <location filename="Throne-1.3.1/src/ui/mainWindow/mainwindow_setup.cpp" line="1028"/>
-        <source>Config copied</source>
-        <translation>配置已复制</translation>
+        <source>Copy</source>
+        <translation>复制</translation>
     </message>
     <message>
-        <location filename="Throne-1.3.1/src/ui/mainWindow/mainwindow_profiles.cpp" line="194"/>
-        <location filename="Throne-1.3.1/src/ui/mainWindow/mainwindow_setup.cpp" line="1029"/>
-        <source>Copy core config</source>
-        <translation>复制核心配置</translation>
-    </message>
-    <message>
-        <location filename="Throne-1.3.1/src/ui/mainWindow/mainwindow_profiles.cpp" line="195"/>
-        <location filename="Throne-1.3.1/src/ui/mainWindow/mainwindow_setup.cpp" line="1030"/>
-        <source>Copy test config</source>
-        <translation>复制测试配置</translation>
+        <source>Copied</source>
+        <translation>已复制</translation>
     </message>
     <message>
         <location filename="Throne-1.3.1/src/ui/mainWindow/mainwindow_profiles.cpp" line="305"/>

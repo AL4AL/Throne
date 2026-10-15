@@ -937,7 +937,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         auto selected = get_now_selected_list();
 
         ui->menu_export_config->setVisible(false);
-        ui->actionExport_Xray_config->setVisible(false);
         if (selected.isEmpty()) return;
 
         auto profile = Configs::dataManager->profilesRepo->GetProfile(selected.first());
@@ -950,39 +949,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         }
 
         ui->menu_export_config->setVisible(true);
-        if (profile->outbound->IsXray() || profile->type == "chain") ui->actionExport_Xray_config->setVisible(true);
-    });
-    connect(ui->actionExport_Xray_config, &QAction::triggered, this, [=,this]() {
-        auto ents = get_now_selected_list();
-        if (ents.count() != 1) return;
-        auto ent = Configs::dataManager->profilesRepo->GetProfile(ents.first());
-
-        auto result = Configs::BuildSingBoxConfig(ent);
-        if (!result->error.isEmpty()) {
-            MessageBoxWarning("Build config error", result->error);
-            return;
-        }
-        QString config_core = QJsonObject2QString(result->xrayConfig, true);
-        QApplication::clipboard()->setText(config_core);
-
-        QMessageBox msg(QMessageBox::Information, tr("Config copied"), config_core);
-        QPushButton *button_1 = msg.addButton(tr("Copy core config"), QMessageBox::YesRole);
-        QPushButton *button_2 = msg.addButton(tr("Copy test config"), QMessageBox::YesRole);
-        msg.addButton(QMessageBox::Ok);
-        msg.setEscapeButton(QMessageBox::Ok);
-        msg.setDefaultButton(QMessageBox::Ok);
-        msg.exec();
-        if (msg.clickedButton() == button_1) {
-            QApplication::clipboard()->setText(config_core);
-        } else if (msg.clickedButton() == button_2) {
-            auto res = Configs::BuildTestConfig({ent});
-            if (!res->error.isEmpty()) {
-                MessageBoxWarning("Build Test config error", res->error);
-                return;
-            }
-            config_core = QJsonObject2QString(res->xrayConfig, true);
-            QApplication::clipboard()->setText(config_core);
-        }
     });
     connect(ui->actionCopy_Test_Result, &QAction::triggered, this, [=,this]() {
         auto ents = get_now_selected_list();

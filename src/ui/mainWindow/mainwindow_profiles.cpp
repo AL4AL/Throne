@@ -4,6 +4,7 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QFile>
 #include <QGuiApplication>
 #include <QItemSelectionModel>
@@ -14,9 +15,12 @@
 #include <QMutex>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScreen>
 #include <QScrollBar>
+#include <QTabWidget>
 #include <QThread>
 #include <QThreadPool>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -35,6 +39,7 @@
 #include "include/ui/mainWindow/MainWindowInternal.h"
 #include "include/ui/profile/dialog_edit_profile.h"
 #include "include/ui/utils/ProfilesTableModel.h"
+#include "include/ui/widget/json/JsonCodeEdit.h"
 
 namespace {
     constexpr int removeListPreviewLimit = 20;
@@ -178,36 +183,49 @@ void MainWindow::on_menu_export_config_triggered() {
     auto ents = get_now_selected_list();
     if (ents.count() != 1) return;
     auto ent = Configs::dataManager->profilesRepo->GetProfile(ents.first());
+    if (ent == nullptr) return;
 
-    auto result = Configs::BuildSingBoxConfig(ent);
-    QString config_core = QJsonObject2QString(result->coreConfig, true);
-    QApplication::clipboard()->setText(config_core);
-
-    QMessageBox msg(QMessageBox::Information, tr("Config copied"), config_core);
-    QPushButton *button_1 = msg.addButton(tr("Copy core config"), QMessageBox::YesRole);
-    QPushButton *button_2 = msg.addButton(tr("Copy test config"), QMessageBox::YesRole);
-    msg.addButton(QMessageBox::Ok);
-    msg.setEscapeButton(QMessageBox::Ok);
-    msg.setDefaultButton(QMessageBox::Ok);
-    msg.exec();
-    if (msg.clickedButton() == button_1) {
-        result = BuildSingBoxConfig(ent);
-        if (!result->error.isEmpty()) {
-            MessageBoxWarning("Build config error", result->error);
-            return;
-        }
-        config_core = QJsonObject2QString(result->coreConfig, true);
-        QApplication::clipboard()->setText(config_core);
-    } else if (msg.clickedButton() == button_2) {
-        auto res = Configs::BuildTestConfig({ent});
-        if (!res->error.isEmpty()) {
-            MessageBoxWarning("Build Test config error", res->error);
-            return;
-        }
-        if (!res->xrayFullConfigs.isEmpty()) config_core = res->xrayFullConfigs.first();
-        else config_core = QJsonObject2QString(res->coreConfig, true);
-        QApplication::clipboard()->setText(config_core);
+    const auto result = Configs::BuildSingBoxConfig(ent);
+    if (!result->error.isEmpty()) {
+        MessageBoxWarning("Build config error", result->error);
+        return;
     }
+    // Taken from one build: the sing-box <-> Xray bridge ports and credentials are generated per build.
+    QStringList xrayConfigs = result->xrayFullConfigs;
+    if (!result->xrayConfig.isEmpty()) xrayConfigs.prepend(QJsonObject2QString(result->xrayConfig, false));
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Export config"));
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *tabs = new QTabWidget(&dialog);
+    const auto addConfigTab = [tabs](const QString &name, const QString &config) {
+        auto *view = new JsonEdit::JsonCodeEdit(tabs);
+        view->setReadOnly(true);
+        view->setPlainText(config);
+        tabs->addTab(view, name);
+    };
+    addConfigTab("sing-box", QJsonObject2QString(result->coreConfig, false));
+    for (int i = 0; i < xrayConfigs.size(); i++) {
+        addConfigTab(xrayConfigs.size() == 1 ? QString("Xray") : QString("Xray %1").arg(i + 1), xrayConfigs[i]);
+    }
+    layout->addWidget(tabs, 1);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    const QString copyText = tr("Copy");
+    const QString copiedText = tr("Copied");
+    auto *copy = buttons->addButton(copyText, QDialogButtonBox::ActionRole);
+    buttons->button(QDialogButtonBox::Close)->setDefault(true);
+    layout->addWidget(buttons);
+
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(copy, &QPushButton::clicked, &dialog, [=] {
+        QApplication::clipboard()->setText(static_cast<QPlainTextEdit *>(tabs->currentWidget())->toPlainText());
+        copy->setText(copiedText);
+        QTimer::singleShot(1500, copy, [=] { copy->setText(copyText); });
+    });
+
+    dialog.resize(QSize(900, 600).boundedTo(dialog.screen()->availableGeometry().size()));
+    dialog.exec();
 }
 
 void MainWindow::display_qr_link(bool nkrFormat) {
