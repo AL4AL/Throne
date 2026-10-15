@@ -161,6 +161,7 @@ namespace Configs {
             struct AuxEndpointGroup {
                 QList<int> hopIDs;
                 QList<int> innerHopIndexes;
+                std::shared_ptr<Profile> endpoint;
             };
             QList<AuxEndpointGroup> auxEndpointGroups;
         };
@@ -493,6 +494,10 @@ namespace Configs {
             return it != cache->profiles.constEnd() && it->clone == ent ? it->live : ent;
         }
 
+        QString profileDisplayName(const std::shared_ptr<Profile> &ent) {
+            return ent->outbound != nullptr ? ent->outbound->DisplayName() : ent->name;
+        }
+
         std::shared_ptr<Profile> getProfile(int id) {
             if (buildProfileOverrides != nullptr) {
                 if (const auto it = buildProfileOverrides->constFind(id); it != buildProfileOverrides->constEnd())
@@ -765,7 +770,7 @@ namespace Configs {
                     }
                     usedProfileIDs << endpointID;
                     for (int hopID : hopIDs) usedProfileIDs << hopID;
-                    RoutingDeps::AuxEndpointGroup auxGroup{hopIDs, {}};
+                    RoutingDeps::AuxEndpointGroup auxGroup{hopIDs, {}, endpointEnt};
                     if (routeChain->innerHopEndpointIDs.contains(endpointID)) {
                         // preferred_by needs an outbound that advertises routes; naming any other hop fails core start.
                         for (qsizetype i = 1; i < hopIDs.size(); i++) {
@@ -1804,6 +1809,8 @@ namespace Configs {
                 }
                 memberTags.append(tag);
                 info.members.append({tag, member});
+                // Connections carry the member the selector picked, never the group's own tag.
+                ctx.result->outboundNames.insert(tag, profileDisplayName(member));
                 if (member->id == selector->pinnedID) pinnedTag = tag;
                 if (member->latency != 0 && member->latency_at > 0 && selector->resultValidityMins > 0)
                 {
@@ -1942,10 +1949,12 @@ namespace Configs {
                     ctx.result->chainGroups.last().profiles.append(ctx.ent);
                 }
             }
+            ctx.result->outboundNames.insert(warpWrap ? tags::warpBypass : tags::proxy, profileDisplayName(ctx.ent));
+            if (warpWrap) ctx.result->outboundNames.insert(tags::proxy, QStringLiteral("WARP"));
 
             int routeSuffix = 0;
             for (const auto& routeGroup : ctx.prerequisites.routing.routeOutboundGroups) {
-                buildOutboundChain(ctx, {
+                const auto tag = buildOutboundChain(ctx, {
                     .hopIDs = routeGroup.hopIDs,
                     .prefix = tags::routeChainPrefix,
                     .link = routeGroup.hopIDs.size() > 1,
@@ -1954,6 +1963,8 @@ namespace Configs {
                 if (routeGroup.chainWrapper != nullptr && !ctx.result->chainGroups.isEmpty()) {
                     ctx.result->chainGroups.last().profiles.append(routeGroup.chainWrapper);
                 }
+                const auto named = routeGroup.chainWrapper != nullptr ? routeGroup.chainWrapper : getProfile(routeGroup.hopIDs.first());
+                if (named != nullptr) ctx.result->outboundNames.insert(tag, profileDisplayName(named));
                 routeSuffix += static_cast<int>(routeGroup.hopIDs.size());
             }
 
@@ -1962,8 +1973,11 @@ namespace Configs {
                 int auxSuffix = 0;
                 for (const auto &group : ctx.prerequisites.routing.auxEndpointGroups) {
                     QList<QString> innerTags;
-                    for (const int idx : group.innerHopIndexes)
+                    for (const int idx : group.innerHopIndexes) {
                         innerTags << hopTag(tags::auxEndpointPrefix, auxSuffix + idx);
+                        if (const auto hop = getProfile(group.hopIDs[idx]); hop != nullptr)
+                            ctx.result->outboundNames.insert(innerTags.last(), profileDisplayName(hop));
+                    }
                     const auto tag = buildOutboundChain(ctx, {
                         .hopIDs = group.hopIDs,
                         .prefix = tags::auxEndpointPrefix,
@@ -1974,6 +1988,7 @@ namespace Configs {
                         .addressableTags = QSet<QString>(innerTags.cbegin(), innerTags.cend()),
                     });
                     if (!ctx.error.isEmpty()) return;
+                    if (group.endpoint != nullptr) ctx.result->outboundNames.insert(tag, profileDisplayName(group.endpoint));
                     ctx.vpnAuxTags << tag;
                     ctx.vpnAuxTags << innerTags;
                     auxSuffix += static_cast<int>(group.hopIDs.size());

@@ -367,6 +367,7 @@ void MainWindow::profile_start(const StartRequest &request) {
         Configs::dataManager->settingsRepo->UpdateStartedId(ent->id);
         // Must land after the stop this start may have run first: that stop clears the map.
         Stats::SetVpnEndpointProfiles(result->vpnEndpointProfiles);
+        Stats::connection_lister->SetOutboundNames(result->outboundNames);
         Configs::SetRunningProfiles(result->involvedProfiles);
         running = ent;
         if (Configs::dataManager->settingsRepo->spmode_system_proxy) set_system_proxy(true);
@@ -528,6 +529,7 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interact
         if (manual) Configs::dataManager->settingsRepo->UpdateStartedId(Configs::NoProfileId);
         // Cleared here too: a restart prompt armed before the UI-thread teardown would have no id to start.
         Configs::ClearRunningProfiles();
+        Stats::connection_lister->SetOutboundNames({});
         running = nullptr;
 
         runOnUiThread([=, this, &restartPrompt] {

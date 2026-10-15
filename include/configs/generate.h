@@ -46,6 +46,8 @@ namespace Configs
         QList<AutoSelectorBuildInfo> autoSelectors;
         // Endpoint hop tag -> profile id, so a live status can be named after its profile.
         QMap<QString, int> vpnEndpointProfiles;
+        // Rule-addressable outbound tag -> the profile it stands for, so connections are named after it.
+        QHash<QString, QString> outboundNames;
         // Every profile the config was built from, chain hops and route members included.
         QSet<int> involvedProfiles;
     };
