@@ -203,7 +203,8 @@ namespace Configs {
             "source_ip_cidr", "source_ip_is_private", "ip_cidr", "ip_is_private", "source_port", "source_port_range",
             "port", "port_range", "process_name", "process_path", "process_path_regex", "package_name",
             "wifi_ssid", "wifi_bssid", "rule_set", "invert", "action", "method", "reject_method", "no_drop",
-            "override_address", "override_port", "tls_spoof", "tls_spoof_method", "override_destination", "strategy",
+            "override_address", "override_port", "tls_fragment", "tls_fragment_fallback_delay", "tls_record_fragment",
+            "tls_spoof", "tls_spoof_method", "override_destination", "strategy",
             "sniffers",
         };
         return keys.contains(key);

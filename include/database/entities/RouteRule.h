@@ -137,6 +137,10 @@ namespace Configs {
 
         QString override_address;
         QString override_port;
+        // since sing-box 1.12.0
+        bool tls_fragment = false;
+        QString tls_fragment_fallback_delay;
+        bool tls_record_fragment = false;
         // since sing-box 1.14.0
         QString tls_spoof;
         QString tls_spoof_method;
