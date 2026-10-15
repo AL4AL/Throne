@@ -441,8 +441,11 @@ void DialogScanInstance::buildHttpPhase(QVBoxLayout *layout) {
     httpForm->addRow(tr("Minimum TLS version"), httpMinTls);
     httpForm->addRow(tr("Maximum TLS version"), httpMaxTls);
     httpFingerprint = new NoWheelComboBox(httpBox);
-    for (const auto &fingerprint : Configs::tlsFingerprints)
+    for (const auto &fingerprint : Configs::tlsFingerprints) {
+        // the probe's Default already is Go's own TLS stack
+        if (fingerprint == Configs::tlsUnsafeFingerprint) continue;
         httpFingerprint->addItem(fingerprint.isEmpty() ? tr("Default") : fingerprint, fingerprint);
+    }
     httpForm->addRow(tr("uTLS fingerprint"), httpFingerprint);
     httpInsecure = new QCheckBox(tr("Allow insecure certificates"), httpBox);
     httpForm->addRow(httpInsecure);

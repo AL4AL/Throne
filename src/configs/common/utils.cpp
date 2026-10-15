@@ -79,6 +79,8 @@ namespace Configs
             || query.hasQueryItem("finalmask")
             // sing-box has no counterpart to verifyPeerCertByName
             || query.hasQueryItem("vcn")
+            // sing-box rejects the CBC suites `cs` is used for; Xray accepts them with fp=unsafe
+            || query.hasQueryItem("cs")
             || (security == "reality" && dataManager->settingsRepo->xray_vless_preference == Xray::XhttpAndReality)
             || (query.queryItemValue("encryption") != "none" && query.queryItemValue("encryption") != "")
             || query.queryItemValue("extra") != "") return true;

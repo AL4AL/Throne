@@ -43,8 +43,12 @@ void DialogEditProfile::loadXrayStream() {
 
     const bool tls = stream->security == "tls";
     ui->xray_sni->setText(tls ? stream->TLS->serverName : stream->reality->serverName);
-    selectComboText(ui->xray_fp, tls ? stream->TLS->fingerprint : stream->reality->fingerprint);
+    // Keep a fingerprint the list does not offer, or saving would silently reset it to Xray's default.
+    const auto fingerprint = tls ? stream->TLS->fingerprint : stream->reality->fingerprint;
+    if (ui->xray_fp->findText(fingerprint) < 0) ui->xray_fp->addItem(fingerprint);
+    selectComboText(ui->xray_fp, fingerprint);
     ui->xray_alpn->setText(stream->TLS->alpn.join(","));
+    ui->xray_cipher_suites->setText(stream->TLS->cipherSuites);
     ui->xray_pinned_peer_cert_sha256->setText(stream->TLS->pinnedPeerCertSha256);
     ui->xray_verify_peer_cert_by_name->setText(stream->TLS->verifyPeerCertByName);
     ui->xray_ech_config_list->setText(stream->TLS->echConfigList);
@@ -101,6 +105,7 @@ void DialogEditProfile::saveXrayStream() {
     stream->TLS->pinnedPeerCertSha256 = ui->xray_pinned_peer_cert_sha256->text().trimmed();
     stream->TLS->verifyPeerCertByName = ui->xray_verify_peer_cert_by_name->text().trimmed();
     stream->TLS->echConfigList = ui->xray_ech_config_list->text().trimmed();
+    stream->TLS->cipherSuites = Configs::splitCipherSuites(ui->xray_cipher_suites->text()).join(':');
     stream->reality->password = ui->xray_reality_pbk->text().trimmed();
     stream->reality->shortId = ui->xray_reality_sid->text().trimmed();
     stream->reality->spiderX = ui->xray_reality_spiderx->text().trimmed();

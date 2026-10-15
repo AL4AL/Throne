@@ -4,7 +4,20 @@
 namespace Configs
 {
 
-    inline QStringList tlsFingerprints = {"", "chrome", "firefox", "edge", "safari", "360", "qq", "ios", "android", "random", "randomized"};
+    // Xray's name for Go's own TLS stack; for sing-box it means uTLS off, overriding the global default.
+    inline const QString tlsUnsafeFingerprint = "unsafe";
+
+    inline QStringList tlsFingerprints = {"", "chrome", "firefox", "edge", "safari", "360", "qq", "ios", "android", "random", "randomized", tlsUnsafeFingerprint};
+
+    // Xray's `cs` link value is colon separated; commas are accepted too.
+    inline QStringList splitCipherSuites(const QString& value)
+    {
+        QStringList result;
+        for (const auto& part : QString(value).replace(',', ':').split(':', Qt::SkipEmptyParts)) {
+            if (const auto trimmed = part.trimmed(); !trimmed.isEmpty()) result << trimmed;
+        }
+        return result;
+    }
 
     inline QStringList tlsSpoofMethods = {"", "wrong-sequence", "wrong-checksum", "wrong-ack", "wrong-md5", "wrong-timestamp"};
 

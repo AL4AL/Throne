@@ -54,6 +54,7 @@ void DialogEditProfile::loadSingboxStream() {
         } else {
             ui->utlsFingerprint->setCurrentText(tls->utls->fingerPrint);
         }
+        ui->cipher_suites->setText(tls->cipher_suites.join(':'));
         ui->reality_pbk->setText(tls->reality->public_key);
         ui->reality_sid->setText(tls->reality->short_id);
     }
@@ -99,6 +100,7 @@ void DialogEditProfile::saveSingboxStream() {
         tls->saveTlsTricksState(ui->tls_tricks->currentIndex());
         tls->utls->fingerPrint = ui->utlsFingerprint->currentText().trimmed();
         tls->utls->enabled = !tls->utls->fingerPrint.isEmpty();
+        tls->cipher_suites = Configs::splitCipherSuites(ui->cipher_suites->text());
         tls->reality->public_key = ui->reality_pbk->text().trimmed();
         tls->reality->short_id = ui->reality_sid->text().trimmed();
         tls->reality->enabled = !tls->reality->public_key.isEmpty();
@@ -168,6 +170,9 @@ void DialogEditProfile::updateTlsControlsEnabled() {
     }
     ui->utlsFingerprint_l->setEnabled(utls);
     ui->utlsFingerprint->setEnabled(utls);
+    // QUIC is TLS 1.3 only, where Go does not let the suites be chosen.
+    ui->cipher_suites_l->setEnabled(!limited && !quic);
+    ui->cipher_suites->setEnabled(!limited && !quic);
     ui->fragment_l->setEnabled(fragment);
     ui->fragment->setEnabled(fragment);
     ui->tls_frag_fall_delay->setEnabled(!limited && ui->fragment->currentIndex() != kTriStateOff);

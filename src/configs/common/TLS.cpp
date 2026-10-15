@@ -85,6 +85,7 @@ namespace Configs {
             obj["enabled"] = true;
             obj["fingerprint"] = Configs::dataManager->settingsRepo->utlsFingerprint;
         }
+        if (obj.value("fingerprint").toString() == tlsUnsafeFingerprint) return {};
         return {obj, ""};
     }
 
@@ -302,7 +303,8 @@ namespace Configs {
         if (query.hasQueryItem("alpn")) alpn = query.queryItemValue("alpn", QUrl::FullyDecoded).split(",");
         if (query.hasQueryItem("tls_min_version")) min_version = query.queryItemValue("tls_min_version");
         if (query.hasQueryItem("tls_max_version")) max_version = query.queryItemValue("tls_max_version");
-        if (query.hasQueryItem("tls_cipher_suites")) cipher_suites = query.queryItemValue("tls_cipher_suites").split(",");
+        if (query.hasQueryItem("tls_cipher_suites")) cipher_suites = splitCipherSuites(query.queryItemValue("tls_cipher_suites", QUrl::FullyDecoded));
+        if (query.hasQueryItem("cs")) cipher_suites = splitCipherSuites(query.queryItemValue("cs", QUrl::FullyDecoded));
         if (query.hasQueryItem("tls_curve_preferences")) curve_preferences = query.queryItemValue("tls_curve_preferences").split(",");
         if (query.hasQueryItem("tls_certificate")) certificate = query.queryItemValue("tls_certificate").split(",");
         if (query.hasQueryItem("tls_certificate_path")) certificate_path = query.queryItemValue("tls_certificate_path");
@@ -412,7 +414,7 @@ namespace Configs {
         if (!alpn.isEmpty()) query.addQueryItem("alpn", alpn.join(","));
         if (!min_version.isEmpty()) query.addQueryItem("tls_min_version", min_version);
         if (!max_version.isEmpty()) query.addQueryItem("tls_max_version", max_version);
-        if (!cipher_suites.isEmpty()) query.addQueryItem("tls_cipher_suites", cipher_suites.join(","));
+        if (!cipher_suites.isEmpty()) query.addQueryItem("cs", cipher_suites.join(":"));
         if (!curve_preferences.isEmpty()) query.addQueryItem("tls_curve_preferences", curve_preferences.join(","));
         if (!certificate.isEmpty()) query.addQueryItem("tls_certificate", certificate.join(","));
         if (!certificate_path.isEmpty()) query.addQueryItem("tls_certificate_path", certificate_path);

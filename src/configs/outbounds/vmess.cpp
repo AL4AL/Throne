@@ -49,6 +49,7 @@ namespace Configs {
                         tls->utls->enabled = true;
                         tls->utls->fingerPrint = fingerprint;
                     }
+                    tls->cipher_suites = splitCipherSuites(objN["cs"].toString());
                 }
 
                 // throneExtra holds what the V2RayN schema cannot; the dummy authority only satisfies QUrl.
@@ -164,6 +165,7 @@ namespace Configs {
             {"alpn", tls->alpn.join(',')},
             {"fp", tls->utls->fingerPrint},
         };
+        if (!tls->cipher_suites.isEmpty()) object["cs"] = tls->cipher_suites.join(':');
         if (tls->insecure) object["allowInsecure"] = QStringLiteral("1");
         if (!extra.isEmpty()) object["throneExtra"] = extra.toString(QUrl::FullyEncoded);
         const auto payload = QJsonDocument(object).toJson(QJsonDocument::Compact).toBase64();

@@ -21,6 +21,8 @@ namespace Configs {
         QString verifyPeerCertByName;
         QStringList alpn;
         QString fingerprint;
+        // Colon separated, as Xray takes it.
+        QString cipherSuites;
         // Base64 ECHConfigList, or "<query domain>+<DoH url>" for Xray to fetch it itself.
         QString echConfigList;
 
