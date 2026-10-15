@@ -198,6 +198,18 @@ Release note:
         <source>Select</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Proxy</source>
+        <translation>پروکسی</translation>
+    </message>
+    <message>
+        <source>Direct</source>
+        <translation>مستقیم</translation>
+    </message>
+    <message>
+        <source>Other outbounds</source>
+        <translation>خروجی‌های دیگر</translation>
+    </message>
 </context>
 <context>
     <name>DialogBasicSettings</name>
@@ -2657,6 +2669,34 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <source>Export config</source>
         <translation>استخراج پیکربندی</translation>
     </message>
+    <message>
+        <source>Proxy</source>
+        <translation>پروکسی</translation>
+    </message>
+    <message>
+        <source>Direct</source>
+        <translation>مستقیم</translation>
+    </message>
+    <message>
+        <source>route</source>
+        <translation>مسیر</translation>
+    </message>
+    <message>
+        <source>aux</source>
+        <translation>کمکی</translation>
+    </message>
+    <message>
+        <source>Traffic statistics are disabled</source>
+        <translation>آمار ترافیک غیرفعال است</translation>
+    </message>
+    <message>
+        <source>Untick “Disable Traffic Stats” in Basic Settings → Miscellaneous to record speeds again.</source>
+        <translation>تیک «غیرفعال کردن آمار ترافیک» را در تنظیمات پایه ← متفرقه بردارید تا سرعت‌ها دوباره ثبت شوند</translation>
+    </message>
+    <message>
+        <source>Open Traffic Statistics…</source>
+        <translation>باز کردن آمار ترافیک…</translation>
+    </message>
 </context>
 <context>
     <name>ProfilesTableModel</name>
@@ -2874,14 +2914,70 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     </message>
 </context>
 <context>
-    <name>SpeedWidget</name>
+    <name>LiveChart</name>
     <message>
-        <source>Proxy</source>
-        <translation>پروکسی</translation>
+        <source>Down</source>
+        <translation>دانلود</translation>
     </message>
     <message>
-        <source>Direct</source>
-        <translation>مستقیم</translation>
+        <source>Up</source>
+        <translation>آپلود</translation>
+    </message>
+    <message>
+        <source>Waiting for traffic</source>
+        <translation>در انتظار ترافیک</translation>
+    </message>
+    <message>
+        <source>The graph fills in once a second while a profile is running.</source>
+        <translation>تا زمانی که یک نمایه در حال اجراست، نمودار هر ثانیه به‌روز می‌شود</translation>
+    </message>
+    <message>
+        <source>All lines are hidden</source>
+        <translation>همه خطوط پنهان هستند</translation>
+    </message>
+    <message>
+        <source>Click an outbound or a direction in the legend to show it.</source>
+        <translation>برای نمایش، روی یک خروجی یا جهت در راهنما کلیک کنید</translation>
+    </message>
+    <message>
+        <source>Total</source>
+        <translation>مجموع</translation>
+    </message>
+    <message>
+        <source>peak of %1 s</source>
+        <translation>اوج در %1 ثانیه</translation>
+    </message>
+    <message>
+        <source>Stopped</source>
+        <translation>متوقف شد</translation>
+    </message>
+    <message>
+        <source>Not running</source>
+        <translation>در حال اجرا نیست</translation>
+    </message>
+    <message>
+        <source>Started %1</source>
+        <translation>شروع %1</translation>
+    </message>
+    <message>
+        <source>Switched to %1</source>
+        <translation>تغییر به %1</translation>
+    </message>
+    <message>
+        <source>Smooth lines</source>
+        <translation>خطوط نرم</translation>
+    </message>
+    <message>
+        <source>Profile events</source>
+        <translation>رویدادهای نمایه</translation>
+    </message>
+    <message>
+        <source>Show all lines</source>
+        <translation>نمایش همه خطوط</translation>
+    </message>
+    <message>
+        <source>Clear history</source>
+        <translation>پاک کردن تاریخچه</translation>
     </message>
 </context>
 </TS>

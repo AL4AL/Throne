@@ -288,6 +288,7 @@ void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
     case MwMessage::UpdateSettings: {
         updateLogFilterFields();
         ui->actionTraffic_Stats->setVisible(!settings->disable_traffic_aggregation);
+        refresh_traffic_graph_settings();
         if (changed(MwArg::TrayIcon)) {
             Icon::InvalidateTrayIconCache();
             icon_status.reset();

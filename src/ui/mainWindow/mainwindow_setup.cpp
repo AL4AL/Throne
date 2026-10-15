@@ -26,6 +26,7 @@
 #include "include/ui/setting/Icon.hpp"
 #include "include/ui/stats/dialog_traffic_stats.h"
 #include "include/ui/stats/RuntimeStatsWidget.h"
+#include "include/ui/widget/LiveChart.h"
 #include "include/ui/widget/StartStopButton.hpp"
 
 #include "include/configs/generate.h"
@@ -406,8 +407,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     });
     syncConnectionViewState();
 
-    speedChartWidget = new SpeedWidget(this);
-    ui->graph_tab->layout()->addWidget(speedChartWidget);
+    setupTrafficGraph();
 
     runtimeStatsWidget = new RuntimeStatsWidget(this);
     auto* runtimeScroll = new QScrollArea(this);
@@ -1073,5 +1073,57 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 MainWindow::~MainWindow() {
     Subscription::updater()->SetUrlTester(nullptr);
     delete ui;
+}
+
+void MainWindow::setupTrafficGraph() {
+    auto &settings = Configs::dataManager->settingsRepo;
+    trafficChart = new LiveChart(LiveChartOptions::trafficGraph(), this);
+    ui->graph_tab->layout()->addWidget(trafficChart);
+    set_traffic_lines({
+        {QStringLiteral("proxy"), tr("Proxy"), Stats::TrafficLineKind::Proxy},
+        {QStringLiteral("direct"), tr("Direct"), Stats::TrafficLineKind::Direct},
+    });
+
+    QStringList hidden;
+    for (const auto &key : settings->traffic_graph_hidden) {
+        const auto parts = key.split(':');
+        if (parts.size() == 2 && (parts[0] == QLatin1String("route") || parts[0] == QLatin1String("aux"))) {
+            bool ok = false;
+            const int id = parts[1].toInt(&ok);
+            if (!ok || Configs::dataManager->profilesRepo->GetProfile(id) == nullptr) continue;
+        }
+        hidden << key;
+    }
+    settings->traffic_graph_hidden = hidden;
+
+    LiveChartState state;
+    state.hiddenRows = hidden;
+    if (settings->traffic_graph_hidden_dirs & 1) state.hiddenColumns << QStringLiteral("d");
+    if (settings->traffic_graph_hidden_dirs & 2) state.hiddenColumns << QStringLiteral("u");
+    state.range = settings->traffic_graph_range;
+    state.smooth = settings->traffic_graph_smooth;
+    state.markers = settings->traffic_graph_markers;
+    trafficChart->setState(state);
+
+    m_trafficGraphSaveDebounce = new QTimer(this);
+    m_trafficGraphSaveDebounce->setSingleShot(true);
+    m_trafficGraphSaveDebounce->setInterval(500);
+    connect(m_trafficGraphSaveDebounce, &QTimer::timeout, this, [] { Configs::dataManager->settingsRepo->Save(); });
+    connect(trafficChart, &LiveChart::stateChanged, this, [this] {
+        const auto chartState = trafficChart->state();
+        auto &repo = Configs::dataManager->settingsRepo;
+        repo->traffic_graph_hidden = chartState.hiddenRows;
+        repo->traffic_graph_hidden_dirs = (chartState.hiddenColumns.contains(QStringLiteral("d")) ? 1 : 0) |
+                                          (chartState.hiddenColumns.contains(QStringLiteral("u")) ? 2 : 0);
+        repo->traffic_graph_range = chartState.range;
+        repo->traffic_graph_smooth = chartState.smooth;
+        repo->traffic_graph_markers = chartState.markers;
+        m_trafficGraphSaveDebounce->start();
+    });
+
+    m_trafficStatsChartAction = new QAction(tr("Open Traffic Statistics…"), this);
+    connect(m_trafficStatsChartAction, &QAction::triggered, this, [this] { ui->actionTraffic_Stats->trigger(); });
+    trafficChart->addMenuAction(m_trafficStatsChartAction);
+    refresh_traffic_graph_settings();
 }
 

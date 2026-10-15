@@ -119,8 +119,6 @@ set(PROJECT_SOURCES
 
         3rdparty/qv2ray/v2/ui/LogHighlighter.cpp
         3rdparty/qv2ray/v2/ui/QvAutoCompleteTextEdit.cpp
-        3rdparty/qv2ray/v2/ui/widgets/speedchart/SpeedWidget.cpp
-        3rdparty/qv2ray/v2/ui/widgets/speedchart/SpeedWidget.hpp
 
         3rdparty/quirc/decode.c
         3rdparty/quirc/identify.c
@@ -149,6 +147,7 @@ set(PROJECT_SOURCES
         src/api/remote/Config.cpp
 
         src/stats/traffic/TrafficLooper.cpp
+        include/stats/traffic/TrafficLine.hpp
         include/stats/traffic/TrafficStatsManager.hpp
         src/stats/traffic/TrafficStatsManager.cpp
 
@@ -223,6 +222,10 @@ set(PROJECT_SOURCES
         src/ui/widget/TrayOtpCodes.cpp
         include/ui/widget/SubscriptionInfoCard.hpp
         src/ui/widget/SubscriptionInfoCard.cpp
+        include/ui/widget/SeriesBuffer.h
+        src/ui/widget/SeriesBuffer.cpp
+        include/ui/widget/LiveChart.h
+        src/ui/widget/LiveChart.cpp
         include/ui/widget/json/JsonTree.h
         src/ui/widget/json/JsonTree.cpp
         include/ui/widget/json/JsonValidator.h
@@ -457,8 +460,6 @@ set(PROJECT_SOURCES
         src/ui/stats/dialog_endpoint_details.cpp
         include/ui/stats/dialog_endpoint_details.h
         include/ui/stats/dialog_endpoint_details.ui
-        src/ui/stats/MiniChartWidget.cpp
-        include/ui/stats/MiniChartWidget.h
 
         src/ui/setting/dialog_integration.cpp
         include/ui/setting/dialog_integration.h

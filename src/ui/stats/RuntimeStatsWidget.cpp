@@ -10,6 +10,7 @@
 #include "include/global/Utils.hpp"
 #include "include/global/HTTPRequestHelper.hpp"
 #include "include/global/CountryHelper.hpp"
+#include "include/ui/widget/LiveChart.h"
 
 #include <QBrush>
 #include <QColor>
@@ -28,6 +29,7 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <limits>
 
 namespace {
     const QColor kRuntimeThroneColor = Stats::kStatsAccentColor;
@@ -52,12 +54,18 @@ RuntimeStatsWidget::RuntimeStatsWidget(QWidget* parent) : QWidget(parent), ui(ne
     ui->formRunning->setColumnStretch(1, 1);
     ui->formRunning->setColumnStretch(3, 1);
 
-    ui->cpuChart->setColors(kRuntimeThroneColor, kRuntimeCoreColor);
-    ui->ramChart->setColors(kRuntimeThroneColor, kRuntimeCoreColor);
-    ui->cpuChart->setFormatter([](double v) { return QString::number(v, 'f', 0) + QStringLiteral("%"); });
-    ui->ramChart->setFormatter([](double v) { return ReadableSize(static_cast<qint64>(v)); });
-    ui->cpuChart->setCaption(tr("CPU"));
-    ui->ramChart->setCaption(tr("RAM"));
+    const QList<LiveChartRow> processRows{
+        LiveChartRow{QStringLiteral("throne"), QStringLiteral("Throne"), {}, kRuntimeThroneColor, 0, true},
+        LiveChartRow{QStringLiteral("core"), tr("Core"), {}, kRuntimeCoreColor, 0, false},
+    };
+    cpuChart_ = new LiveChart(LiveChartOptions::sparkline(tr("CPU"), LiveChartAxis::percent()), this);
+    ramChart_ = new LiveChart(LiveChartOptions::sparkline(tr("RAM"), LiveChartAxis::bytes()), this);
+    for (auto *chart : {cpuChart_, ramChart_}) {
+        chart->setMinimumHeight(100);
+        chart->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        chart->setRows(processRows);
+        ui->chartsRow->addWidget(chart);
+    }
     ui->labelThroneName->setText(QStringLiteral("<span style=\"color:%1\">●</span> %2")
                                      .arg(kRuntimeThroneColor.name(), "Throne"));
     ui->labelCoreName->setText(QStringLiteral("<span style=\"color:%1\">●</span> %2")
@@ -92,10 +100,8 @@ bool RuntimeStatsWidget::panelActive() const {
 
 void RuntimeStatsWidget::showEvent(QShowEvent *event) {
     QWidget::showEvent(event);
-    // A hidden gap turns the next CPU delta into an average over that gap, and splices the sparklines.
+    // A hidden gap would turn the next CPU delta into an average over that gap.
     metrics_.reset();
-    ui->cpuChart->clear();
-    ui->ramChart->clear();
     // The panel outlives a visit now, so the egress snapshot has to go stale with it; lastProbeSecs_ still rate-limits.
     egressSnapshotDone_ = false;
     timer_->start();
@@ -122,10 +128,15 @@ void RuntimeStatsWidget::refreshLive() {
     ui->vCoreRam->setText(formatRam(coreSample));
     ui->vCoreCpu->setText(formatCpu(coreSample));
 
-    ui->cpuChart->push(selfSample.ok ? selfSample.cpuPercent : 0.0,
-                       coreSample.ok ? coreSample.cpuPercent : 0.0);
-    ui->ramChart->push(selfSample.ok ? static_cast<double>(selfSample.rssBytes) : 0.0,
-                       coreSample.ok ? static_cast<double>(coreSample.rssBytes) : 0.0);
+    const auto cpu = [](const Sys::ProcessMetrics::Sample &s) {
+        return s.ok && s.cpuValid ? s.cpuPercent : std::numeric_limits<double>::quiet_NaN();
+    };
+    const auto ram = [](const Sys::ProcessMetrics::Sample &s) {
+        return s.ok ? static_cast<double>(s.rssBytes) : std::numeric_limits<double>::quiet_NaN();
+    };
+    const qint64 sampledAt = MonotonicMs();
+    cpuChart_->addPoint(sampledAt, true, {cpu(selfSample), cpu(coreSample)});
+    ramChart_->addPoint(sampledAt, true, {ram(selfSample), ram(coreSample)});
 
     const auto rate = [](double bps) { return ReadableSize(static_cast<qint64>(bps)) + QStringLiteral("/s"); };
     if (Stats::trafficLooper && Stats::trafficLooper->proxy) {

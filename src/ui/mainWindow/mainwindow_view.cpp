@@ -1,6 +1,8 @@
 #include "include/ui/mainwindow.h"
 #include "NkrVersion.h"
 
+#include <algorithm>
+
 #include <QApplication>
 #include <QHeaderView>
 #include <QScrollBar>
@@ -19,6 +21,7 @@
 #include "include/ui/stats/dialog_auto_selector.h"
 #include "include/ui/utils/ProfilesTableFilterHeader.h"
 #include "include/ui/utils/ProfilesTableModel.h"
+#include "include/ui/widget/LiveChart.h"
 #include "include/ui/widget/StartStopButton.hpp"
 
 // Mirrors the language switch in main.cpp; QLocale() alone follows the system, not an explicit setting.
@@ -285,18 +288,63 @@ void MainWindow::refresh_startstop_button() {
     }
 }
 
-void MainWindow::update_traffic_graph(int proxyDl, int proxyUp, int directDl, int directUp)
-{
-    m_liveRates = LiveRates{.proxyUp = proxyUp, .proxyDown = proxyDl, .directUp = directUp, .directDown = directDl};
-    m_liveRatesAt.start();
-    if (speedChartWidget) {
-        QMap<SpeedWidget::GraphType, long> pointData;
-        pointData[SpeedWidget::OUTBOUND_PROXY_UP] = proxyUp;
-        pointData[SpeedWidget::OUTBOUND_PROXY_DOWN] = proxyDl;
-        pointData[SpeedWidget::OUTBOUND_DIRECT_UP] = directUp;
-        pointData[SpeedWidget::OUTBOUND_DIRECT_DOWN] = directDl;
+void MainWindow::set_traffic_lines(const QList<Stats::TrafficLine> &lines) {
+    m_trafficLines = lines;
+    if (trafficChart == nullptr) return;
+    QList<LiveChartRow> rows;
+    int nextSlot = 1;
+    for (const auto &line : lines) {
+        LiveChartRow row;
+        row.key = line.key;
+        switch (line.kind) {
+            case Stats::TrafficLineKind::Proxy:
+                row.label = tr("Proxy");
+                row.paletteSlot = 0;
+                row.wash = true;
+                break;
+            case Stats::TrafficLineKind::Route:
+            case Stats::TrafficLineKind::Aux:
+                row.label = line.name;
+                row.kind = line.kind == Stats::TrafficLineKind::Route ? tr("route") : tr("aux");
+                row.paletteSlot = std::min(nextSlot++, 4);
+                break;
+            case Stats::TrafficLineKind::Other:
+                row.label = line.name;
+                row.paletteSlot = std::min(nextSlot++, 4);
+                break;
+            case Stats::TrafficLineKind::Direct:
+                row.label = tr("Direct");
+                row.paletteSlot = -1;
+                break;
+        }
+        rows << row;
+    }
+    trafficChart->setRows(rows);
+}
 
-        speedChartWidget->AddPointData(pointData);
+void MainWindow::add_traffic_point(qint64 monoMs, bool coreRunning, const QVector<double> &values,
+                                   double proxyDown, double proxyUp, double directDown, double directUp) {
+    m_liveRates = LiveRates{
+        .proxyUp = static_cast<qint64>(proxyUp),
+        .proxyDown = static_cast<qint64>(proxyDown),
+        .directUp = static_cast<qint64>(directUp),
+        .directDown = static_cast<qint64>(directDown),
+    };
+    m_liveRatesAt.start();
+    if (trafficChart == nullptr) return;
+    if (coreRunning && values.size() != m_trafficLines.size() * 2) return;
+    trafficChart->addPoint(monoMs, coreRunning, values);
+}
+
+void MainWindow::refresh_traffic_graph_settings() {
+    const auto &settings = Configs::dataManager->settingsRepo;
+    if (m_trafficStatsChartAction != nullptr) m_trafficStatsChartAction->setVisible(!settings->disable_traffic_aggregation);
+    if (trafficChart == nullptr) return;
+    if (settings->disable_traffic_stats) {
+        trafficChart->setBlocked(tr("Traffic statistics are disabled"),
+                                 tr("Untick “Disable Traffic Stats” in Basic Settings → Miscellaneous to record speeds again."));
+    } else {
+        trafficChart->setBlocked({});
     }
 }
 

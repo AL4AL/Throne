@@ -119,6 +119,13 @@ namespace Configs {
         QString splitter_state = "";
         bool enable_stats = true;
         int stats_tab = 0; // either connection or log
+        // LiveChartState of the traffic graph; keys are Stats::TrafficLine keys.
+        QStringList traffic_graph_hidden = {};
+        // Bit 0 hides download, bit 1 upload.
+        int traffic_graph_hidden_dirs = 0;
+        int traffic_graph_range = 1;
+        bool traffic_graph_smooth = true;
+        bool traffic_graph_markers = true;
         // Stats::ConnectionSort; 0 == Stats::Default, the core's own ordering.
         int connection_sort = 0;
         bool connection_sort_asc = false;

@@ -8028,6 +8028,73 @@ Improves hole-punching reliability. Requires IPv4.</source>
     </message>
 </context>
 <context>
+    <name>LiveChart</name>
+    <message>
+        <source>Down</source>
+        <translation>下载</translation>
+    </message>
+    <message>
+        <source>Up</source>
+        <translation>上传</translation>
+    </message>
+    <message>
+        <source>Waiting for traffic</source>
+        <translation>等待流量</translation>
+    </message>
+    <message>
+        <source>The graph fills in once a second while a profile is running.</source>
+        <translation>配置档运行时，图表每秒更新一次。</translation>
+    </message>
+    <message>
+        <source>All lines are hidden</source>
+        <translation>所有曲线均已隐藏</translation>
+    </message>
+    <message>
+        <source>Click an outbound or a direction in the legend to show it.</source>
+        <translation>点击图例中的出站或方向即可显示。</translation>
+    </message>
+    <message>
+        <source>Total</source>
+        <translation>合计</translation>
+    </message>
+    <message>
+        <source>peak of %1 s</source>
+        <translation>%1 秒内峰值</translation>
+    </message>
+    <message>
+        <source>Stopped</source>
+        <translation>已停止</translation>
+    </message>
+    <message>
+        <source>Not running</source>
+        <translation>未在运行</translation>
+    </message>
+    <message>
+        <source>Started %1</source>
+        <translation>已启动 %1</translation>
+    </message>
+    <message>
+        <source>Switched to %1</source>
+        <translation>已切换到 %1</translation>
+    </message>
+    <message>
+        <source>Smooth lines</source>
+        <translation>平滑曲线</translation>
+    </message>
+    <message>
+        <source>Profile events</source>
+        <translation>配置档事件</translation>
+    </message>
+    <message>
+        <source>Show all lines</source>
+        <translation>显示所有曲线</translation>
+    </message>
+    <message>
+        <source>Clear history</source>
+        <translation>清除历史</translation>
+    </message>
+</context>
+<context>
     <name>MainWindow</name>
     <message>
         <source>Connect</source>
@@ -9522,6 +9589,26 @@ Error: %1</source>
         <location filename="Throne-1.3.1/src/ui/mainWindow/TestRunner.cpp" line="645"/>
         <source>[%1] speed test error: %2</source>
         <translation>[%1] 速度测试错误：%2</translation>
+    </message>
+    <message>
+        <source>route</source>
+        <translation>路由</translation>
+    </message>
+    <message>
+        <source>aux</source>
+        <translation>辅助</translation>
+    </message>
+    <message>
+        <source>Traffic statistics are disabled</source>
+        <translation>流量统计已禁用</translation>
+    </message>
+    <message>
+        <source>Untick “Disable Traffic Stats” in Basic Settings → Miscellaneous to record speeds again.</source>
+        <translation>在“基本设置 → 杂项”中取消勾选“禁用流量统计”即可重新记录速度。</translation>
+    </message>
+    <message>
+        <source>Open Traffic Statistics…</source>
+        <translation>打开流量统计…</translation>
     </message>
 </context>
 <context>
@@ -11078,6 +11165,14 @@ Release note:
         <source>Ignore</source>
         <translation>忽略</translation>
     </message>
+    <message>
+        <source>Proxy</source>
+        <translation>代理</translation>
+    </message>
+    <message>
+        <source>Other outbounds</source>
+        <translation>其他出站</translation>
+    </message>
 </context>
 <context>
     <name>QPlatformTheme</name>
@@ -11660,21 +11755,6 @@ Remove that endpoint from this routing profile as well?</source>
         <location filename="Throne-1.3.1/src/ui/stats/RuntimeStatsWidget.cpp" line="366"/>
         <source>N/A</source>
         <translation>不可用</translation>
-    </message>
-</context>
-<context>
-    <name>SpeedWidget</name>
-    <message>
-        <location filename="Throne-1.3.1/3rdparty/qv2ray/v2/ui/widgets/speedchart/SpeedWidget.cpp" line="186"/>
-        <location filename="Throne-1.3.1/3rdparty/qv2ray/v2/ui/widgets/speedchart/SpeedWidget.cpp" line="187"/>
-        <source>Proxy</source>
-        <translation>代理</translation>
-    </message>
-    <message>
-        <location filename="Throne-1.3.1/3rdparty/qv2ray/v2/ui/widgets/speedchart/SpeedWidget.cpp" line="189"/>
-        <location filename="Throne-1.3.1/3rdparty/qv2ray/v2/ui/widgets/speedchart/SpeedWidget.cpp" line="190"/>
-        <source>Direct</source>
-        <translation>直连</translation>
     </message>
 </context>
 <context>

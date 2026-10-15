@@ -26,6 +26,7 @@
 #include <QDialog>
 #include <QFontDatabase>
 #include <QFontInfo>
+#include <QTextBoundaryFinder>
 
 #ifdef Q_OS_WIN
 #include "include/sys/windows/guihelper.h"
@@ -240,6 +241,19 @@ QString ReadableSize(const qint64 &size) {
         sizeAsDouble /= 1024.0;
     }
     return QString::fromLatin1("%1 %2").arg(sizeAsDouble, 0, 'f', 2).arg(measure);
+}
+
+QString ShortDisplayName(const QString &name, int maxGraphemes) {
+    if (name.size() <= maxGraphemes) return name;
+    QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, name);
+    qsizetype cut = 0;
+    for (int i = 0; i < maxGraphemes - 1; ++i) {
+        cut = finder.toNextBoundary();
+        if (cut < 0) return name;
+    }
+    const qsizetype end = finder.toNextBoundary();
+    if (end < 0 || end == name.size()) return name;
+    return name.left(cut).trimmed() + QStringLiteral("…");
 }
 
 bool IsIpAddress(const QString &str) {

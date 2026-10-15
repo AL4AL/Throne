@@ -19,6 +19,7 @@ namespace Ui {
 QT_END_NAMESPACE
 
 class QTimer;
+class LiveChart;
 
 class RuntimeStatsWidget : public QWidget {
     Q_OBJECT
@@ -43,6 +44,8 @@ private:
 
     Ui::RuntimeStatsWidget* ui;
     QTimer* timer_ = nullptr;
+    LiveChart* cpuChart_ = nullptr;
+    LiveChart* ramChart_ = nullptr;
     Sys::ProcessMetrics metrics_;
     std::atomic<bool> probing_{false};
     std::atomic<bool> connBusy_{false};

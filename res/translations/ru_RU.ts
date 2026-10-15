@@ -6486,6 +6486,73 @@ Improves hole-punching reliability. Requires IPv4.</source>
     </message>
 </context>
 <context>
+    <name>LiveChart</name>
+    <message>
+        <source>Down</source>
+        <translation>Входящий</translation>
+    </message>
+    <message>
+        <source>Up</source>
+        <translation>Исходящий</translation>
+    </message>
+    <message>
+        <source>Waiting for traffic</source>
+        <translation>Ожидание трафика</translation>
+    </message>
+    <message>
+        <source>The graph fills in once a second while a profile is running.</source>
+        <translation>График обновляется раз в секунду, пока запущен профиль.</translation>
+    </message>
+    <message>
+        <source>All lines are hidden</source>
+        <translation>Все линии скрыты</translation>
+    </message>
+    <message>
+        <source>Click an outbound or a direction in the legend to show it.</source>
+        <translation>Нажмите на outbound или направление в легенде, чтобы показать его.</translation>
+    </message>
+    <message>
+        <source>Total</source>
+        <translation>Всего</translation>
+    </message>
+    <message>
+        <source>peak of %1 s</source>
+        <translation>пик за %1 с</translation>
+    </message>
+    <message>
+        <source>Stopped</source>
+        <translation>Остановлено</translation>
+    </message>
+    <message>
+        <source>Not running</source>
+        <translation>Не запущен</translation>
+    </message>
+    <message>
+        <source>Started %1</source>
+        <translation>Запущен %1</translation>
+    </message>
+    <message>
+        <source>Switched to %1</source>
+        <translation>Переключено на %1</translation>
+    </message>
+    <message>
+        <source>Smooth lines</source>
+        <translation>Сглаживать линии</translation>
+    </message>
+    <message>
+        <source>Profile events</source>
+        <translation>События профилей</translation>
+    </message>
+    <message>
+        <source>Show all lines</source>
+        <translation>Показать все линии</translation>
+    </message>
+    <message>
+        <source>Clear history</source>
+        <translation>Очистить историю</translation>
+    </message>
+</context>
+<context>
     <name>MainWindow</name>
     <message>
         <source>Connect</source>
@@ -7664,6 +7731,26 @@ Name: %1</source>
     <message>
         <source>Close all connections for &quot;%1&quot; (%2)</source>
         <translation>Закрыть все соединения &quot;%1&quot; (%2)</translation>
+    </message>
+    <message>
+        <source>route</source>
+        <translation>маршрут</translation>
+    </message>
+    <message>
+        <source>aux</source>
+        <translation>доп.</translation>
+    </message>
+    <message>
+        <source>Traffic statistics are disabled</source>
+        <translation>Статистика трафика отключена</translation>
+    </message>
+    <message>
+        <source>Untick “Disable Traffic Stats” in Basic Settings → Miscellaneous to record speeds again.</source>
+        <translation>Снимите флажок «Отключить статистику трафика» в разделе «Основные настройки → Прочее», чтобы снова записывать скорость.</translation>
+    </message>
+    <message>
+        <source>Open Traffic Statistics…</source>
+        <translation>Открыть статистику трафика…</translation>
     </message>
 </context>
 <context>
@@ -8889,6 +8976,18 @@ Release note:
         <source>Generating a WARP identity registers a new device with Cloudflare.&lt;br&gt;&lt;br&gt;Do you accept the &lt;a href=&quot;%1&quot;&gt;Cloudflare WARP terms of service&lt;/a&gt;?</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Proxy</source>
+        <translation>Прокси</translation>
+    </message>
+    <message>
+        <source>Direct</source>
+        <translation>Напрямую</translation>
+    </message>
+    <message>
+        <source>Other outbounds</source>
+        <translation>Прочие outbound</translation>
+    </message>
 </context>
 <context>
     <name>QPlatformTheme</name>
@@ -9351,17 +9450,6 @@ Remove that endpoint from this routing profile as well?</source>
     <message>
         <source>State</source>
         <translation>Cостояние</translation>
-    </message>
-</context>
-<context>
-    <name>SpeedWidget</name>
-    <message>
-        <source>Proxy</source>
-        <translation>Прокси</translation>
-    </message>
-    <message>
-        <source>Direct</source>
-        <translation>Напрямую</translation>
     </message>
 </context>
 <context>

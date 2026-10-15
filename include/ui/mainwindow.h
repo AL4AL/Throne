@@ -8,7 +8,7 @@
 
 #include "include/global/Configs.hpp"
 #include "include/stats/connections/connectionLister.hpp"
-#include "3rdparty/qv2ray/v2/ui/widgets/speedchart/SpeedWidget.hpp"
+#include "include/stats/traffic/TrafficLine.hpp"
 #include "include/database/entities/Profile.h"
 #ifdef Q_OS_LINUX
 #include <QtDBus>
@@ -167,7 +167,12 @@ public:
 
     void refresh_status(const QString &traffic_update = "");
 
-    void update_traffic_graph(int proxyDl, int proxyUp, int directDl, int directUp);
+    // Lines of the config about to run; must arrive before its first add_traffic_point.
+    void set_traffic_lines(const QList<Stats::TrafficLine> &lines);
+
+    // values: [down, up] per line of the last set_traffic_lines, in its order.
+    void add_traffic_point(qint64 monoMs, bool coreRunning, const QVector<double> &values,
+                           double proxyDown, double proxyUp, double directDown, double directUp);
 
     void profile_start(int _id = -1);
 
@@ -365,7 +370,12 @@ private:
     QIcon connectionExpandIcon;
     QIcon connectionCollapseIcon;
     int toolTipID;
-    SpeedWidget *speedChartWidget;
+    class LiveChart *trafficChart = nullptr;
+    QList<Stats::TrafficLine> m_trafficLines;
+    QTimer *m_trafficGraphSaveDebounce = nullptr;
+    QAction *m_trafficStatsChartAction = nullptr;
+    // Set while profile_start stops the running profile, so that stop is marked as part of the switch.
+    std::atomic<bool> m_switchingProfile = false;
     struct LiveRates {
         qint64 proxyUp = 0;
         qint64 proxyDown = 0;
@@ -661,6 +671,10 @@ private:
     void SeedDashboard();
 
     void setupConnectionList();
+
+    void setupTrafficGraph();
+
+    void refresh_traffic_graph_settings();
 
     void setupConnectionSortMenu();
 

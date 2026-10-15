@@ -88,6 +88,8 @@ namespace Configs {
             {"dns_use_hosts", &dns_use_hosts},
             {"dns_predefined_enable", &dns_predefined_enable},
             {"connection_sort_asc", &connection_sort_asc},
+            {"traffic_graph_smooth", &traffic_graph_smooth},
+            {"traffic_graph_markers", &traffic_graph_markers},
         };
 
         intMap = {
@@ -102,6 +104,8 @@ namespace Configs {
             {"max_log_line",           &max_log_line},
             {"log_font_size",          &log_font_size},
             {"stats_tab",              &stats_tab},
+            {"traffic_graph_hidden_dirs", &traffic_graph_hidden_dirs},
+            {"traffic_graph_range",    &traffic_graph_range},
             {"connection_sort",        &connection_sort},
             {"traffic_stats_retention_days", &traffic_stats_retention_days},
             {"sub_auto_update",        &sub_auto_update},
@@ -206,6 +210,7 @@ namespace Configs {
             {"log_include_regex",        &log_include_regex},
             {"log_exclude_keyword",      &log_exclude_keyword},
             {"log_exclude_regex",        &log_exclude_regex},
+            {"traffic_graph_hidden",     &traffic_graph_hidden},
             {"warp_ifc_addrs",           &warp_ifc_addrs},
             {"vpn_private_ranges",       &vpn_private_ranges},
             {"xray_geoip_url_history",   &xray_geoip_url_history},

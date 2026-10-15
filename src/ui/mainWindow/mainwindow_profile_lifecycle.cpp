@@ -9,6 +9,7 @@
 #include "include/api/RPC.h"
 #include "include/ui/utils/RestartPrompt.h"
 #include "include/ui/stats/dialog_endpoint_details.h"
+#include "include/ui/widget/LiveChart.h"
 
 #include <QPushButton>
 #include <QMessageBox>
@@ -436,13 +437,18 @@ void MainWindow::profile_start(const StartRequest &request) {
     });
 
     runOnNewThread([=, this] {
-        if (running != nullptr) {
+        const bool switching = running != nullptr;
+        if (switching) {
+            m_switchingProfile = true;
             profile_stop(false, false, true, resolved.interactive);
             mu_stopping.lock();
             mu_stopping.unlock();
+            m_switchingProfile = false;
         }
         MW_show_log(">>>>>>>> " + tr("Starting profile %1").arg(ent->outbound->DisplayTypeAndName()));
-        if (!profile_start_stage2(restartPrompt)) {
+        const bool started = profile_start_stage2(restartPrompt);
+        const auto markerAt = MonotonicMs();
+        if (!started) {
             MW_show_log("<<<<<<<< " + tr("Failed to start profile %1").arg(ent->outbound->DisplayTypeAndName()));
         }
         mu_starting.unlock();
@@ -450,6 +456,13 @@ void MainWindow::profile_start(const StartRequest &request) {
             if (restartPrompt) restartPrompt->dismiss();
             m_profileConnecting = false;
             refresh_startstop_button();
+            if (trafficChart == nullptr) return;
+            if (started) {
+                trafficChart->addMarker(markerAt, switching ? LiveChart::Marker::Switched : LiveChart::Marker::Started,
+                                        ent->outbound ? ent->outbound->DisplayName() : ent->name);
+            } else if (switching) {
+                trafficChart->addMarker(markerAt, LiveChart::Marker::Stopped, {});
+            }
         });
     });
 }
@@ -531,9 +544,11 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interact
         Configs::ClearRunningProfiles();
         Stats::connection_lister->SetOutboundNames({});
         running = nullptr;
+        const auto stoppedAt = MonotonicMs();
 
         runOnUiThread([=, this, &restartPrompt] {
             if (restartPrompt) restartPrompt->dismiss();
+            if (trafficChart != nullptr && !m_switchingProfile) trafficChart->addMarker(stoppedAt, LiveChart::Marker::Stopped, {});
 
             m_profileDisconnecting = false;
             clearRestartNeeded();

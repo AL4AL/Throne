@@ -215,6 +215,10 @@ static ThemeTokens resolveTokens(const QPalette &pal) {
     t.danger  = separate(QColor(0xC6, 0x28, 0x28), t.surface, 4.5);
     t.success = separate(QColor(0x2E, 0x7D, 0x32), t.surface, 4.5);
     t.info    = separate(QColor(0x32, 0x99, 0xFF), t.surface, 4.0);
+    const std::array<QColor, 5> series{QColor(0x2A, 0x78, 0xD6), QColor(0xEB, 0x68, 0x34), QColor(0x1B, 0xAF, 0x7A),
+                                       QColor(0xE0, 0x69, 0x9A), QColor(0x5B, 0x4B, 0xC4)};
+    for (size_t i = 0; i < series.size(); ++i) t.chartSeries[i] = separate(series[i], t.surface, 3.0);
+    t.chartContext = separate(QColor(0x7D, 0x87, 0x96), t.surface, 3.0);
     return t;
 }
 

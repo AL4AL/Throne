@@ -2,7 +2,6 @@
 #include "include/global/Utils.hpp"
 
 #include <QHash>
-#include <QTextBoundaryFinder>
 
 #include <algorithm>
 
@@ -28,21 +27,6 @@ namespace {
     void sortTree(Groups &groups, bool descending, GroupKey groupKey, LeafKey leafKey) {
         sortItems(groups, descending, groupKey);
         for (auto &group : groups) sortItems(group->children, descending, leafKey);
-    }
-
-    // Counts graphemes, so a flag emoji leading a profile name is never cut in half.
-    QString shortOutbound(const QString &name) {
-        constexpr int kMaxGraphemes = 15;
-        if (name.size() <= kMaxGraphemes) return name;
-        QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, name);
-        qsizetype cut = 0;
-        for (int i = 0; i < kMaxGraphemes - 1; ++i) {
-            cut = finder.toNextBoundary();
-            if (cut < 0) return name;
-        }
-        const qsizetype end = finder.toNextBoundary();
-        if (end < 0 || end == name.size()) return name;
-        return name.left(cut).trimmed() + QStringLiteral("…");
     }
 
     QString outboundToolTip(const QString &name, const QString &tag) {
@@ -222,7 +206,7 @@ void ConnectionsTreeModel::setConnections(const QList<Stats::ConnectionMetadata>
     QHash<QString, QString> shortOutbounds;
     const auto outboundText = [&shortOutbounds](const QString &name) -> const QString & {
         auto it = shortOutbounds.find(name);
-        if (it == shortOutbounds.end()) it = shortOutbounds.insert(name, shortOutbound(name));
+        if (it == shortOutbounds.end()) it = shortOutbounds.insert(name, ShortDisplayName(name));
         return it.value();
     };
 

@@ -4,6 +4,8 @@
 #include <QPalette>
 #include <QColor>
 
+#include <array>
+
 // UI colours resolved from the installed palette, then contrast-repaired against `surface`.
 // Use these rather than palette(...) in a QSS: stylesheet palette() resolves against
 // QGuiApplication::palette() regardless of the widget, and only ever the Active group.
@@ -16,6 +18,8 @@ struct ThemeTokens {
     QColor danger;
     QColor success;
     QColor info;
+    std::array<QColor, 5> chartSeries;
+    QColor chartContext;
 };
 
 class ThemeManager : public QObject {

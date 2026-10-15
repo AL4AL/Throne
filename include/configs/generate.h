@@ -20,9 +20,14 @@ namespace Configs
         bool noLog = false;
     };
 
+    enum class TrafficChainKind { Main, Route, Aux };
+
     struct TrafficChainGroup {
         QString watchTag;
         QList<std::shared_ptr<Profile>> profiles;
+        TrafficChainKind kind = TrafficChainKind::Main;
+        int profileId = -1;
+        QString name;
     };
 
     struct AutoSelectorBuildInfo {

@@ -1,6 +1,7 @@
 // DO NOT INCLUDE THIS
 #pragma once
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <QObject>
@@ -206,6 +207,14 @@ QList<int> MkManyPorts(int num, const QString &address = "127.0.0.1");
 QString DisplayTime(long long time, int formatType = 0);
 
 QString ReadableSize(const qint64 &size);
+
+// At most maxGraphemes, so a leading flag emoji is never cut in half; longer names end in "…".
+QString ShortDisplayName(const QString &name, int maxGraphemes = 15);
+
+// steady_clock, so a wall-clock change can't reorder timestamps taken with it.
+inline qint64 MonotonicMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 inline bool InRange(unsigned x, unsigned low, unsigned high) {
     return (low <= x && x <= high);

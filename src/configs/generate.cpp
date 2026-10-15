@@ -1954,17 +1954,25 @@ namespace Configs {
 
             int routeSuffix = 0;
             for (const auto& routeGroup : ctx.prerequisites.routing.routeOutboundGroups) {
+                const auto groupsBefore = ctx.result->chainGroups.size();
                 const auto tag = buildOutboundChain(ctx, {
                     .hopIDs = routeGroup.hopIDs,
                     .prefix = tags::routeChainPrefix,
                     .link = routeGroup.hopIDs.size() > 1,
                     .startSuffix = routeSuffix,
                 });
-                if (routeGroup.chainWrapper != nullptr && !ctx.result->chainGroups.isEmpty()) {
+                const bool grew = ctx.result->chainGroups.size() > groupsBefore;
+                if (routeGroup.chainWrapper != nullptr && grew) {
                     ctx.result->chainGroups.last().profiles.append(routeGroup.chainWrapper);
                 }
                 const auto named = routeGroup.chainWrapper != nullptr ? routeGroup.chainWrapper : getProfile(routeGroup.hopIDs.first());
                 if (named != nullptr) ctx.result->outboundNames.insert(tag, profileDisplayName(named));
+                if (named != nullptr && grew) {
+                    auto &chainGroup = ctx.result->chainGroups.last();
+                    chainGroup.kind = TrafficChainKind::Route;
+                    chainGroup.profileId = named->id;
+                    chainGroup.name = profileDisplayName(named);
+                }
                 routeSuffix += static_cast<int>(routeGroup.hopIDs.size());
             }
 
@@ -1978,6 +1986,7 @@ namespace Configs {
                         if (const auto hop = getProfile(group.hopIDs[idx]); hop != nullptr)
                             ctx.result->outboundNames.insert(innerTags.last(), profileDisplayName(hop));
                     }
+                    const auto groupsBefore = ctx.result->chainGroups.size();
                     const auto tag = buildOutboundChain(ctx, {
                         .hopIDs = group.hopIDs,
                         .prefix = tags::auxEndpointPrefix,
@@ -1989,6 +1998,12 @@ namespace Configs {
                     });
                     if (!ctx.error.isEmpty()) return;
                     if (group.endpoint != nullptr) ctx.result->outboundNames.insert(tag, profileDisplayName(group.endpoint));
+                    if (group.endpoint != nullptr && ctx.result->chainGroups.size() > groupsBefore) {
+                        auto &chainGroup = ctx.result->chainGroups.last();
+                        chainGroup.kind = TrafficChainKind::Aux;
+                        chainGroup.profileId = group.endpoint->id;
+                        chainGroup.name = profileDisplayName(group.endpoint);
+                    }
                     ctx.vpnAuxTags << tag;
                     ctx.vpnAuxTags << innerTags;
                     auxSuffix += static_cast<int>(group.hopIDs.size());
