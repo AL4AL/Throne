@@ -36,12 +36,11 @@
 #include <QSemaphore>
 #include <QMutex>
 #include <QThreadPool>
-#include <QLocalServer>
-#include <QLocalSocket>
 
 #include "include/database/entities/GroupSort.h"
 #include "include/engine/EnginePolicy.h"
 #include "include/engine/EngineTypes.h"
+#include "include/engine/tests/TestObserver.h"
 #include "include/ui/setting/Icon.hpp"
 #include "include/ui/utils/DataViewHtmlGenerator.h"
 #include "include/ui/utils/GuiUtils.hpp"
@@ -49,23 +48,22 @@
 #include "include/ui/utils/ProfilesTableModel.h"
 #include "ui_mainwindow.h"
 
-namespace Configs_sys {
-    class CoreProcess;
-}
-
 namespace Configs {
     enum simpleAction : int;
 }
 
 namespace Engine {
+    class AutoSelectorController;
+    class CoreSupervisor;
     class EngineControl;
+    class StatsService;
+    class TestRunner;
 }
 
 class QMessageBox;
 class TrayProfileSelector;
 class TrayOtpCodes;
 class GlobalHotkeys;
-class TestRunner;
 class MainWindowEngineControl;
 class DialogVpnAuth;
 class DialogScanner;
@@ -94,7 +92,7 @@ enum class RefreshAnchor {
 
 using ExitReason = Engine::ExitReason;
 
-class MainWindow : public QMainWindow, public Engine::EnginePolicy {
+class MainWindow : public QMainWindow, public Engine::EnginePolicy, public Engine::TestObserver {
     Q_OBJECT
 
 public:
@@ -308,12 +306,11 @@ private:
     QPointer<TrayOtpCodes> trayOtpCodes;
     void openTrayOtpCodes();
     QThreadPool *parallelCoreCallPool = new QThreadPool(this);
-    std::unique_ptr<TestRunner> testRunner;
-    Configs_sys::CoreProcess *core_process = nullptr;
-    QMutex coreProcessMutex;
-    QLocalServer *core_server = nullptr;
-    bool rpc_started = false;
-    qint64 vpn_pid = 0;
+    std::unique_ptr<Engine::TestRunner> testRunner;
+    // After testRunner, so it is destroyed first.
+    std::unique_ptr<Engine::AutoSelectorController> m_autoSelector;
+    Engine::CoreSupervisor *m_coreSupervisor = nullptr;
+    Engine::StatsService *m_stats = nullptr;
     QTextDocument *qvLogDocument = new QTextDocument(this);
     QString title_error;
     std::optional<Icon::TrayIconStatus> icon_status;
@@ -326,7 +323,6 @@ private:
     bool m_profileDisconnecting = false;
     ConnectionState m_lastConnectionState = ConnectionState::Idle;
     quint64 m_startSerial = 0;
-    bool m_xrayGeoAssetBusy = false;
     QString traffic_update_cache;
     qint64 last_test_time = 0;
     bool select_mode = false;
@@ -360,8 +356,6 @@ private:
     // Set while profile_start stops the running profile, so that stop is marked as part of the switch.
     std::atomic<bool> m_switchingProfile = false;
     using LiveRates = Engine::LiveRates;
-    LiveRates m_liveRates;
-    QElapsedTimer m_liveRatesAt;
     class RuntimeStatsWidget *runtimeStatsWidget = nullptr;
     std::atomic<qint64> lastUpdatedMs = QDateTime::currentMSecsSinceEpoch();
     DataViewHtmlGenerator dataViewHtmlGenerator_;
@@ -560,17 +554,9 @@ private:
 
     void loadShortcuts();
 
-    void setup_rpc(QLocalSocket *socket);
+    void on_core_started(int profileId);
 
-    bool verify_core_pid(QLocalSocket *socket);
-
-    void rank_auto_selector(const std::shared_ptr<Configs::Profile>& ent, const QList<int>& stale = {});
-
-    void on_auto_selector_exhausted(int profileID);
-
-    void on_subscription_group_changed(int gid, const QList<int>& disturbed);
-
-    bool auto_selector_ranked = false;
+    void on_core_gave_up(const QString &reason);
 
     bool handleXrayGeoAssetError(const QString& error, const QString& contextName, bool prompt = true);
 
@@ -618,14 +604,14 @@ private:
 
     bool guard_core_restart_pending() const;
 
-    // The restarted core starts the request through CoreStarted; a start requested meanwhile replaces it.
+    // The restarted core starts the request through coreStarted; a start requested meanwhile replaces it.
     void restart_core_for_guard(const StartRequest &request);
 
     QPointer<QMessageBox> m_killSwitchDialog;
     bool m_killSwitchWasFailed = false;
     bool m_killSwitchWasArmed = false;
     StartRequest m_killSwitchDeferredStart;
-    // CoreStarted carries only a profile id, so the rest of the request waits here.
+    // coreStarted carries only a profile id, so the rest of the request waits here.
     StartRequest m_coreStartRequest;
     QElapsedTimer m_guardCoreRestart;
 
@@ -739,7 +725,19 @@ private:
 
     void testSessionBusy(const QString &text) override;
 
-    friend class TestRunner;
+    // TestObserver, in mainwindow_view.cpp; synchronous, so a panel seed never lands after the next session's clear.
+    void testPanelSeeded(Engine::TestKind kind, int totalProfiles) override;
+
+    void testProgressed() override;
+
+    void testPanelsCleared() override;
+
+    void testViewChanged(bool force) override;
+
+    void speedTestProgress(const QString &profileName, const libcore::SpeedTestResult &result) override;
+
+    void testedProfilesChanged(const QList<int> &profileIds) override;
+
     friend class MainWindowEngineControl;
 
 protected:

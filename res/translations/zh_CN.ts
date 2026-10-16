@@ -12010,4 +12010,23 @@ Remove that endpoint from this routing profile as well?</source>
         <translation>页面 %1/%2</translation>
     </message>
 </context>
+<context>
+    <name>Engine::CoreSupervisor</name>
+    <message>
+        <source>Throne could not open the local channel the core connects to (%1), so no profile can start.</source>
+        <translation>Throne 无法打开核心用于连接的本地通道（%1），因此无法启动任何配置档。</translation>
+    </message>
+    <message>
+        <source>Core unavailable</source>
+        <translation>核心不可用</translation>
+    </message>
+    <message>
+        <source>The core did not connect within %1 s, restarting it.</source>
+        <translation>核心未在 %1 秒内连接，正在重启。</translation>
+    </message>
+    <message>
+        <source>The core keeps exiting, so it is no longer restarted. Use Restart Core to try again.</source>
+        <translation>核心反复退出，已不再自动重启。请使用“重启核心”重试。</translation>
+    </message>
+</context>
 </TS>

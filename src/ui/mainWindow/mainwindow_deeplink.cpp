@@ -399,39 +399,38 @@ void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
     case MwMessage::SubscriptionNewGroup:
         refresh_groups();
         break;
-    case MwMessage::SubscriptionGroupChanged: {
-        QList<int> disturbed;
-        for (int i = 1; i < args.size(); i++) disturbed << args[i].toInt();
-        on_subscription_group_changed(args.value(0).toInt(), disturbed);
-        break;
-    }
     case MwMessage::GroupOrderChanged:
         if (args.contains(Int2String(settings->current_group))) refresh_proxy_list({}, true);
         break;
-    case MwMessage::CoreCrashed:
-        profile_stop();
-        break;
-    case MwMessage::CoreStarted:
-        m_guardCoreRestart.invalidate();
-        LOG_INFO(QString("elevated: %1").arg(Configs::IsAdmin(true) ? "yes" : "no"));
-        // The core may just have been given root, which the guard needs too.
-        if (Sys::KillSwitch::instance()->failedForPrivileges()) Sys::KillSwitch::instance()->apply();
-        if (settings->remember_enable && settings->remember_system_proxy) {
-            set_spmode_system_proxy(true, false);
-        }
-        if ((settings->remember_enable && settings->remember_tun) || settings->flag_restart_tun_on) {
-            set_spmode_vpn(true, settings->flag_restart_tun_on);
-            settings->flag_restart_tun_on = false;
-        }
-        {
-            const int id = args.value(0).toInt();
-            const auto request = std::exchange(m_coreStartRequest, StartRequest{});
-            if (request.profileId >= 0 && request.profileId != id) {
-                emit start_finished(request.serial, request.profileId, StartOutcome::Superseded, {});
-            }
-            if (id >= 0) profile_start(request.profileId == id ? request : StartRequest{id});
-        }
-        refresh_status();
-        break;
     }
+}
+
+void MainWindow::on_core_started(int profileId) {
+    auto &settings = Configs::dataManager->settingsRepo;
+    m_guardCoreRestart.invalidate();
+    // The core may just have been given root, which the guard needs too.
+    if (Sys::KillSwitch::instance()->failedForPrivileges()) Sys::KillSwitch::instance()->apply();
+    if (settings->remember_enable && settings->remember_system_proxy) {
+        set_spmode_system_proxy(true, false);
+    }
+    if ((settings->remember_enable && settings->remember_tun) || settings->flag_restart_tun_on) {
+        set_spmode_vpn(true, settings->flag_restart_tun_on);
+        settings->flag_restart_tun_on = false;
+    }
+    {
+        const int id = profileId;
+        const auto request = std::exchange(m_coreStartRequest, StartRequest{});
+        if (request.profileId >= 0 && request.profileId != id) {
+            emit start_finished(request.serial, request.profileId, StartOutcome::Superseded, {});
+        }
+        if (id >= 0) profile_start(request.profileId == id ? request : StartRequest{id});
+    }
+    refresh_status();
+}
+
+void MainWindow::on_core_gave_up(const QString &reason) {
+    // Otherwise a start within the window would wait on a guard restart that is not coming.
+    m_guardCoreRestart.invalidate();
+    const auto request = std::exchange(m_coreStartRequest, StartRequest{});
+    if (request.profileId >= 0) emit start_finished(request.serial, request.profileId, StartOutcome::CoreUnavailable, reason);
 }

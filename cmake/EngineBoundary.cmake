@@ -9,9 +9,6 @@ file(TO_CMAKE_PATH "${ROOT}" ROOT)
 
 # E5 ratchet: files outside the UI that still include include/ui/. Entries only ever leave this list.
 set(UI_INCLUDE_ALLOWLIST
-        src/stats/connectionLister/connectionLister.cpp # Phase 3
-        src/stats/traffic/TrafficLooper.cpp             # Phase 3
-        src/sys/CoreDiagnostics.cpp                     # Phase 3
         src/sys/macos/TrayIcon.mm                       # permanent
 )
 

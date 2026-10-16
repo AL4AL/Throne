@@ -58,7 +58,7 @@ namespace Engine {
 
         virtual void queueUrlTests(const QList<int> &profileIds, const std::function<void()> &onFinished) = 0;
 
-        // Blocks until the session winds down; never call it on the main thread.
+        // Asks the core to stop and returns without waiting for the session to wind down; blocks on an RPC, so never on the main thread.
         virtual void stopTests() = 0;
 
         // A no-op while nothing runs.

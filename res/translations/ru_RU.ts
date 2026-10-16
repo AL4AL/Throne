@@ -9706,4 +9706,23 @@ Remove that endpoint from this routing profile as well?</source>
         <translation>Страница %1/%2</translation>
     </message>
 </context>
+<context>
+    <name>Engine::CoreSupervisor</name>
+    <message>
+        <source>Throne could not open the local channel the core connects to (%1), so no profile can start.</source>
+        <translation>Throne не удалось открыть локальный канал, через который подключается ядро (%1), поэтому ни один профиль не может быть запущен.</translation>
+    </message>
+    <message>
+        <source>Core unavailable</source>
+        <translation>Ядро недоступно</translation>
+    </message>
+    <message>
+        <source>The core did not connect within %1 s, restarting it.</source>
+        <translation>Ядро не подключилось за %1 с, перезапуск.</translation>
+    </message>
+    <message>
+        <source>The core keeps exiting, so it is no longer restarted. Use Restart Core to try again.</source>
+        <translation>Ядро постоянно завершает работу, поэтому больше не перезапускается. Попробуйте снова через «Перезапуск ядра».</translation>
+    </message>
+</context>
 </TS>

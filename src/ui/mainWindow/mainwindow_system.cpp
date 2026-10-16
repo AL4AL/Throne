@@ -17,13 +17,13 @@
 #include "include/api/remote/Server.hpp"
 #include "include/configs/generate.h"
 #include "include/engine/ThreadCheck.h"
+#include "include/engine/supervisor/CoreSupervisor.h"
 #include "include/global/Configs.hpp"
 #include "include/global/HTTPRequestHelper.hpp"
 #include "include/global/LocalNetwork.hpp"
 #include "include/global/Logger.hpp"
 #include "include/scanner/ScanManager.h"
 #include "include/sys/KillSwitch.hpp"
-#include "include/sys/Process.hpp"
 #include "include/sys/SystemProxy.hpp"
 #include "include/ui/mainWindow/MainWindowInternal.h"
 
@@ -41,8 +41,7 @@
 #endif
 
 qint64 MainWindow::GetCorePid() {
-    QMutexLocker lock(&coreProcessMutex);
-    return core_process ? core_process->processId() : 0;
+    return m_coreSupervisor->corePid();
 }
 
 QString MainWindow::GetRunningConfigName() {
@@ -140,10 +139,7 @@ void MainWindow::prepare_exit(bool interactive)
     Configs::dataManager->settingsRepo->noSave = true; // don't change Configs::dataManager->settingsRepo after this line
     profile_stop(false, true, false, interactive);
 
-    runOnThread([=, this]()
-    {
-        core_process->Kill();
-    }, DS_cores, true);
+    m_coreSupervisor->shutdown();
     HideWindow(this);
     tray->hide();
     // Only once the core is gone: until then the guard keeps blocking whatever would leak around the dying tunnel.
@@ -346,20 +342,12 @@ bool MainWindow::choose_route(int routeId, bool interactive, quint64 restartSeri
 }
 
 bool MainWindow::StopVPNProcess() {
-    runOnThread([=, this]
-    {
-        core_process->Kill();
-    }, DS_cores, true);
-
+    m_coreSupervisor->killForPrivilegeChange();
     return true;
 }
 
 void MainWindow::RestartCore() {
-    runOnThread([=, this]
-    {
-        profile_stop(true, true, true);
-        core_process->Kill();
-    }, DS_cores);
+    m_coreSupervisor->resetCore();
 }
 
 void MainWindow::kill_switch_state_changed() {
@@ -410,12 +398,7 @@ void MainWindow::disable_kill_switch() {
 }
 
 bool MainWindow::core_lacks_guard_identity() {
-#ifdef Q_OS_WIN
-    return false;
-#else
-    QMutexLocker lock(&coreProcessMutex);
-    return core_process != nullptr && Configs::dataManager->settingsRepo->core_running && !core_process->guard_identity;
-#endif
+    return m_coreSupervisor->runningWithoutGuardIdentity();
 }
 
 bool MainWindow::guard_core_restart_pending() const {
@@ -424,13 +407,7 @@ bool MainWindow::guard_core_restart_pending() const {
 }
 
 void MainWindow::restart_core_for_guard(const StartRequest &request) {
-    bool haveCore;
-    {
-        // The IPC handler takes this slot under the same lock when the new core connects.
-        QMutexLocker lock(&coreProcessMutex);
-        haveCore = core_process != nullptr;
-        if (haveCore) core_process->start_profile_when_core_is_up = request.profileId;
-    }
+    const bool haveCore = m_coreSupervisor->setStartWhenUp(request.profileId);
     if (!haveCore) {
         emit start_finished(request.serial, request.profileId, StartOutcome::CoreUnavailable, {});
         return;
@@ -439,10 +416,7 @@ void MainWindow::restart_core_for_guard(const StartRequest &request) {
     if (guard_core_restart_pending()) return;
     m_guardCoreRestart.start();
     MW_show_log(tr("[Kill switch] Restarting the core so that its own traffic passes the kill switch..."));
-    runOnThread([this] {
-        profile_stop(true, true);
-        core_process->Restart();
-    }, DS_cores);
+    m_coreSupervisor->restartForGuard();
 }
 
 namespace {

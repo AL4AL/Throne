@@ -91,4 +91,24 @@ namespace Engine::ProfileService {
         }
         return std::nullopt;
     }
+
+    int RemoveUnavailable(QList<int> profileIds) {
+        ENGINE_CHECK_MAIN_THREAD();
+        const auto group = Configs::dataManager->groupsRepo->CurrentGroup();
+        if (!group) return 0;
+
+        if (profileIds.isEmpty()) profileIds = group->Profiles();
+
+        QList<int> del_ids;
+        for (const auto &profile : Configs::dataManager->profilesRepo->GetProfileBatch(profileIds)) {
+            if (profile->IsUnavailable()) del_ids += profile->id;
+        }
+        if (del_ids.isEmpty()) return 0;
+
+        // Strips started_id from del_ids, so the running profile survives.
+        if (!Configs::dataManager->profilesRepo->BatchDeleteProfiles(del_ids)) return 0;
+        if (del_ids.isEmpty()) return 0;
+        EngineEvents::ProfilesRemoved(del_ids);
+        return static_cast<int>(del_ids.size());
+    }
 } // namespace Engine::ProfileService

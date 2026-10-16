@@ -812,6 +812,8 @@ namespace RemoteApi {
         }
         switch (engine_->connectionState()) {
             case Engine::ConnectionState::Idle:
+                // Still a stop: it cancels the resume of a crashed profile that waits for the core.
+                engine_->stop(Engine::StopOptions{.manual = true, .interactive = false});
                 respond(Response::Ok(statusJson()));
                 return;
             case Engine::ConnectionState::Connecting:

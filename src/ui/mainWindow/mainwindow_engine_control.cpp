@@ -1,7 +1,8 @@
 #include "include/ui/mainWindow/MainWindowEngineControl.h"
 
 #include "include/ui/mainwindow.h"
-#include "include/ui/mainWindow/TestRunner.h"
+#include "include/engine/services/StatsService.h"
+#include "include/engine/tests/TestRunner.h"
 
 MainWindowEngineControl::MainWindowEngineControl(MainWindow *mw) : EngineControl(mw), mw_(mw) {
     connect(mw, &MainWindow::start_finished, this, &Engine::EngineControl::startFinished, Qt::DirectConnection);
@@ -50,11 +51,8 @@ int MainWindowEngineControl::clearTestResults(const QList<int> &profileIds) {
 }
 
 std::optional<Engine::LiveRates> MainWindowEngineControl::freshLiveRates(qint64 maxAgeMs) const {
-    if (mw_->runningSnapshot() == nullptr || Configs::dataManager->settingsRepo->disable_traffic_stats || !mw_->m_liveRatesAt.isValid() ||
-        mw_->m_liveRatesAt.hasExpired(maxAgeMs)) {
-        return std::nullopt;
-    }
-    return mw_->m_liveRates;
+    if (mw_->runningSnapshot() == nullptr) return std::nullopt;
+    return mw_->m_stats->freshLiveRates(maxAgeMs);
 }
 
 bool MainWindowEngineControl::testsRunning() {

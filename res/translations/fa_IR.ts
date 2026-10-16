@@ -3052,4 +3052,23 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>پاک کردن تاریخچه</translation>
     </message>
 </context>
+<context>
+    <name>Engine::CoreSupervisor</name>
+    <message>
+        <source>Throne could not open the local channel the core connects to (%1), so no profile can start.</source>
+        <translation>Throne نتوانست کانال محلی‌ای را که هسته به آن وصل می‌شود باز کند (%1)، بنابراین هیچ نمایه‌ای نمی‌تواند شروع شود.</translation>
+    </message>
+    <message>
+        <source>Core unavailable</source>
+        <translation>هسته در دسترس نیست</translation>
+    </message>
+    <message>
+        <source>The core did not connect within %1 s, restarting it.</source>
+        <translation>هسته ظرف %1 ثانیه وصل نشد، در حال راه‌اندازی مجدد آن.</translation>
+    </message>
+    <message>
+        <source>The core keeps exiting, so it is no longer restarted. Use Restart Core to try again.</source>
+        <translation>هسته مدام متوقف می‌شود، بنابراین دیگر دوباره راه‌اندازی نمی‌شود. برای تلاش دوباره از «Restart Core» استفاده کنید.</translation>
+    </message>
+</context>
 </TS>

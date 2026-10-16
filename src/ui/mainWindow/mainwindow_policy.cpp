@@ -91,7 +91,7 @@ void MainWindow::killSwitchProblem() {
             on_menu_exit_triggered();
         }, Qt::QueuedConnection);
 #else
-        // Otherwise the core restarts once it is privileged, and CoreStarted retries.
+        // Otherwise the core restarts once it is privileged, and on_core_started retries.
         if (get_elevated_permissions()) Sys::KillSwitch::instance()->apply();
 #endif
     });

@@ -30,6 +30,8 @@
 #endif
 #ifdef Q_OS_WIN
 #include <windows.h>
+// <windows.h> defines SetPort, which under unity builds clobbers Configs::outbound::SetPort.
+#undef SetPort
 #endif
 
 namespace Engine {

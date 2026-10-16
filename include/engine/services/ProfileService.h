@@ -13,4 +13,8 @@ namespace Engine::ProfileService {
     // Main thread, with none of them running. Deletes them, resets the front/landing proxies that pointed at them, and
     // emits SubscriptionGroupChanged per affected group (auto-selector pruning) and ProfilesRemoved.
     std::optional<ServiceError> Delete(const QList<int> &profileIds, int *deleted = nullptr);
+
+    // Main thread. Deletes the unavailable ones among profileIds (the current group's when empty), never the running
+    // profile, and emits ProfilesRemoved for them; no SubscriptionGroupChanged. Returns how many it deleted.
+    int RemoveUnavailable(QList<int> profileIds);
 } // namespace Engine::ProfileService

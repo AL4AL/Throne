@@ -12,7 +12,7 @@
 #include "include/engine/services/GroupService.h"
 #include "include/ui/group/dialog_edit_group.h"
 #include "include/ui/mainWindow/MainWindowInternal.h"
-#include "include/ui/mainWindow/TestRunner.h"
+#include "include/engine/tests/TestRunner.h"
 #include "include/ui/stats/dialog_endpoint_details.h"
 #include "include/ui/utils/ProfilesTableFilterHeader.h"
 #include "include/global/Utils.hpp"

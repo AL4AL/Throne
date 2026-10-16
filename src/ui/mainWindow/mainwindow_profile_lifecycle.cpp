@@ -1,11 +1,10 @@
 #include "include/ui/mainwindow.h"
 
-#include "include/ui/mainWindow/TestRunner.h"
+#include "include/engine/autoselector/AutoSelectorController.h"
+#include "include/engine/services/StatsService.h"
+#include "include/engine/supervisor/CoreSupervisor.h"
+#include "include/engine/tests/TestRunner.h"
 
-#include "include/stats/traffic/TrafficLooper.hpp"
-#include "include/stats/traffic/TrafficStatsManager.hpp"
-#include "include/stats/autoselector/AutoSelectorMonitor.hpp"
-#include "include/configs/AutoSelectorPlan.h"
 #include "include/api/RPC.h"
 #include "include/engine/vpn/VpnEndpoints.h"
 #include "include/ui/widget/LiveChart.h"
@@ -24,24 +23,12 @@
 #include "include/global/VpnCredentialOverride.hpp"
 
 #include "include/sys/KillSwitch.hpp"
-#include "include/sys/Process.hpp"
 
 #include <algorithm>
 #include <memory>
 #include <utility>
 
 using namespace API;
-
-void MainWindow::setup_rpc(QLocalSocket *socket) {
-    defaultClient->Reconnect(socket);
-
-    if (!rpc_started) {
-        rpc_started = true;
-        runOnNewThread([=, this] { Stats::trafficLooper->Loop(); });
-        runOnNewThread([=, this] { Stats::connection_lister->Loop(); });
-        runOnNewThread([=, this] { Stats::autoSelectorMonitor->Loop(); });
-    }
-}
 
 int MainWindow::get_profile_to_start() {
     const auto ents = get_now_selected_list();
@@ -71,58 +58,7 @@ int MainWindow::get_profile_to_start() {
 }
 
 bool MainWindow::handleXrayGeoAssetError(const QString& error, const QString& contextName, bool prompt) {
-    const auto classified = Engine::AssetUpdates::ClassifyGeoError(error);
-    if (!classified.isGeo) return false;
-    if (!prompt) {
-        if (classified.missingCategory) {
-            const QString needed = classified.needed.isEmpty() ? tr("a required category") : classified.needed;
-            MW_show_log(tr("The Xray config \"%1\" needs \"%2\", but the installed %3 does not contain it.")
-                            .arg(contextName, needed, classified.whichFile));
-        } else {
-            QStringList missing;
-            if (classified.refGeoip) missing << QStringLiteral("geoip.dat");
-            if (classified.refGeosite) missing << QStringLiteral("geosite.dat");
-            MW_show_log(tr("The Xray config \"%1\" needs geo data files that are not installed: %2. Download them under Basic Settings > Miscellaneous > Xray Geo Assets.")
-                            .arg(contextName, missing.join(QStringLiteral(", "))));
-        }
-        return true;
-    }
-
-    runOnUiThread([=, this] {
-        if (m_xrayGeoAssetBusy || Engine::AssetUpdates::GeoUpdateRunning()) return;
-        m_xrayGeoAssetBusy = true;
-        setTimeout([=, this] {
-            const auto geo = Engine::AssetUpdates::ClassifyGeoError(error);
-            if (geo.missingCategory) {
-                const QString needed = geo.needed.isEmpty() ? tr("a required category") : geo.needed;
-                policy()->geoAssetMissingCategory(contextName, needed, geo.whichFile);
-                m_xrayGeoAssetBusy = false;
-                return;
-            }
-
-            const bool confirmed = policy()->confirmGeoAssetDownload(contextName);
-            m_xrayGeoAssetBusy = false;
-            if (!confirmed) return;
-
-            Engine::AssetUpdates::GeoRequest request;
-            request.files.clear();
-            for (const auto &status : Engine::AssetUpdates::GeoStatus()) {
-                if (!status.present) request.files << status.file;
-            }
-            request.onlyMissing = true;
-            const bool started = Engine::AssetUpdates::UpdateGeoAssets(request, [this](const QList<Engine::AssetUpdates::GeoFileResult> &results) {
-                QString dlErr;
-                for (const auto &result : results) {
-                    if (!result.error.isEmpty()) dlErr += result.fileName + ": " + result.error + "\n";
-                }
-                if (dlErr.isEmpty()) MW_show_log(tr("Downloaded Xray geo asset files."));
-                policy()->geoAssetDownloadFinished(dlErr);
-            });
-            // An API request may have started a download while the question was open.
-            if (!started) MW_show_log(tr("Geo asset files are already being downloaded."));
-        }, this, 300);
-    });
-    return true;
+    return Engine::AssetUpdates::HandleXrayGeoError(policy(), error, contextName, prompt);
 }
 
 void MainWindow::profile_start(int _id) {
@@ -196,21 +132,7 @@ void MainWindow::profile_start(const StartRequest &request) {
     }
 
     // Ranking must run before the config is built and it blocks, so hop off the UI thread.
-    if (ent->type == "autoselector" && !auto_selector_ranked) {
-        const auto plan = Configs::PlanAutoSelector(ent);
-        if (plan.error.isEmpty() && plan.needsRanking) {
-            auto_selector_ranked = true;
-            runOnNewThread([=, this] {
-                rank_auto_selector(ent);
-                runOnUiThread([=, this] {
-                    auto_selector_ranked = false;
-                    profile_start(resolved);
-                });
-            });
-            return;
-        }
-    }
-    auto_selector_ranked = false;
+    if (m_autoSelector->rankBeforeStart(ent, resolved.interactive, [=, this] { profile_start(resolved); })) return;
 
     const auto result = Configs::BuildSingBoxConfig(ent);
     if (!result->error.isEmpty()) {
@@ -294,35 +216,13 @@ void MainWindow::profile_start(const StartRequest &request) {
             }
             return false;
         }
-        Stats::trafficLooper->SetChainGroups(result->chainGroups);
-        Stats::trafficLooper->loop_enabled = true;
-        Stats::connection_lister->suspend = false;
-        Stats::autoSelectorMonitor->SetBuild(result->autoSelectors);
-        if (!result->autoSelectors.isEmpty()) {
-            const auto& info = result->autoSelectors.first();
-            if (auto selector = ent->AutoSelector(); selector != nullptr) {
-                QList<int> builtIDs;
-                QHash<int, QString> names;
-                for (const auto& [tag, member] : info.members) {
-                    if (member == nullptr) continue;
-                    builtIDs << member->id;
-                    names.insert(member->id, member->outbound ? member->outbound->DisplayName() : member->name);
-                }
-                const auto now = QDateTime::currentSecsSinceEpoch();
-                selector->lastBuilt = builtIDs;
-                selector->lastBuiltAt = now;
-                selector->RecordHistory(builtIDs, names, now);
-                Configs::dataManager->profilesRepo->Save(ent);
-                MW_show_log(tr("[Auto selector] Running the best %1 of %2 ranked profiles.")
-                                .arg(builtIDs.size())
-                                .arg(selector->pool.size()));
-            }
-        }
+        m_stats->beginRun(result->chainGroups);
+        m_autoSelector->noteBuilt(ent, result->autoSelectors);
 
         Configs::dataManager->settingsRepo->UpdateStartedId(ent->id);
         // Must land after the stop this start may have run first: that stop clears the map.
         Stats::SetVpnEndpointProfiles(result->vpnEndpointProfiles);
-        Stats::connection_lister->SetOutboundNames(result->outboundNames);
+        m_stats->setOutboundNames(result->outboundNames);
         Configs::SetRunningProfiles(result->involvedProfiles);
         setRunning(ent);
         if (Configs::dataManager->settingsRepo->spmode_system_proxy) set_system_proxy(true);
@@ -334,7 +234,6 @@ void MainWindow::profile_start(const StartRequest &request) {
             start_vpn_challenge_poll();
             refresh_status();
             refresh_proxy_list({ent->id});
-            refresh_auto_selector_view();
             emit start_finished(resolved.serial, resolved.profileId, StartOutcome::Started, {});
 
             // "Only route advertised network" rejects this probe.
@@ -373,14 +272,14 @@ void MainWindow::profile_start(const StartRequest &request) {
     mu_stopping.unlock();
 
     if (!Configs::dataManager->settingsRepo->core_running) {
+        if (!m_coreSupervisor->canStartCore()) {
+            mu_starting.unlock();
+            fail_start(resolved, StartOutcome::CoreUnavailable, software_name, m_coreSupervisor->lastFailure());
+            return;
+        }
         defer_start_to_core(resolved);
-        runOnThread(
-            [=, this] {
-                MW_show_log(tr("Try to start the config, but the core has not listened to the RPC port, so restart it..."));
-                core_process->start_profile_when_core_is_up = ent->id;
-                core_process->Restart();
-            },
-            DS_cores);
+        MW_show_log(tr("Try to start the config, but the core has not listened to the RPC port, so restart it..."));
+        m_coreSupervisor->restartNotListening(ent->id);
         mu_starting.unlock();
         return;
     }
@@ -428,6 +327,8 @@ void MainWindow::profile_start(const StartRequest &request) {
 void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interactive) {
     const auto current = runningSnapshot();
     if (current == nullptr) {
+        // A crashed profile waits for the restarted core with nothing running; a user stop cancels that.
+        if (manual && !crash) runOnUiThread([this] { m_coreSupervisor->cancelResume(); });
         return;
     }
     const auto id = current->id;
@@ -462,24 +363,17 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interact
     }
 
     // profile_stop() is reached from a worker thread as well as the UI one.
-    runOnUiThread([this] { UpdateConnectionList({}); });
+    m_stats->clearConnectionList();
 
     runOnUiThread([this] {
         m_profileDisconnecting = true;
         refresh_startstop_button();
     });
 
-    Stats::autoSelectorMonitor->Clear();
-    runOnUiThread([this] { refresh_auto_selector_view(); });
+    m_autoSelector->noteStopped();
 
     runOnNewThread([=, this] {
-        Stats::trafficLooper->loop_enabled = false;
-        Stats::connection_lister->suspend = true;
-        Stats::trafficLooper->loop_mutex.lock();
-        Stats::trafficLooper->UpdateAll();
-        Stats::trafficLooper->loop_mutex.unlock();
-        Stats::trafficLooper->PersistTraffic();
-        Stats::trafficStatsManager->Flush();
+        m_stats->endRun();
 
         // runOnUiThread is a no-op before qApp exists, so the teardown must not chase this.
         Engine::SlowOperation slowStop;
@@ -501,7 +395,7 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interact
         if (manual) Configs::dataManager->settingsRepo->UpdateStartedId(Configs::NoProfileId);
         // Cleared here too: a restart prompt armed before the UI-thread teardown would have no id to start.
         Configs::ClearRunningProfiles();
-        Stats::connection_lister->SetOutboundNames({});
+        m_stats->setOutboundNames({});
         setRunning(nullptr);
         const auto stoppedAt = MonotonicMs();
 

@@ -71,6 +71,46 @@ void MainWindow::UpdateDataView(bool force)
     lastUpdatedMs.store(QDateTime::currentMSecsSinceEpoch());
 }
 
+void MainWindow::testPanelSeeded(Engine::TestKind kind, int totalProfiles)
+{
+    switch (kind) {
+        case Engine::TestKind::Latency:
+            dataViewHtmlGenerator_.seedLatencyTest(DataViewHtmlGenerator::LatencyTestPanelState::Kind::Url, totalProfiles);
+            break;
+        case Engine::TestKind::Ip:
+            dataViewHtmlGenerator_.seedLatencyTest(DataViewHtmlGenerator::LatencyTestPanelState::Kind::Ip, totalProfiles);
+            break;
+        case Engine::TestKind::Speed:
+            dataViewHtmlGenerator_.seedSpeedTest(totalProfiles);
+            break;
+    }
+}
+
+void MainWindow::testProgressed()
+{
+    dataViewHtmlGenerator_.addTestProgress();
+}
+
+void MainWindow::testPanelsCleared()
+{
+    dataViewHtmlGenerator_.clearTestSections();
+}
+
+void MainWindow::testViewChanged(bool force)
+{
+    UpdateDataView(force);
+}
+
+void MainWindow::speedTestProgress(const QString &profileName, const libcore::SpeedTestResult &result)
+{
+    dataViewHtmlGenerator_.setSpeedtestProgress(profileName, result);
+}
+
+void MainWindow::testedProfilesChanged(const QList<int> &profileIds)
+{
+    refresh_proxy_list(profileIds);
+}
+
 void MainWindow::noteRestartNeeded(const QString& reason)
 {
     if (Configs::dataManager->settingsRepo->started_id < 0) return;
@@ -215,7 +255,7 @@ void MainWindow::refresh_status(const QString &traffic_update) {
 
     auto make_title = [=,this](bool isTray) {
         QStringList tt;
-        if (!isTray && Configs::IsAdmin()) tt << "[Admin]";
+        if (!isTray && Configs::KnownAdmin().value_or(false)) tt << "[Admin]";
         if (select_mode) tt << "[" + tr("Select") + "]";
         if (!title_error.isEmpty()) tt << "[" + title_error + "]";
         if (settings->spmode_vpn && !settings->spmode_system_proxy) tt << "[Tun]";
@@ -350,13 +390,6 @@ void MainWindow::set_traffic_lines(const QList<Stats::TrafficLine> &lines) {
 
 void MainWindow::add_traffic_point(qint64 monoMs, bool coreRunning, const QVector<double> &values,
                                    double proxyDown, double proxyUp, double directDown, double directUp) {
-    m_liveRates = LiveRates{
-        .proxyUp = static_cast<qint64>(proxyUp),
-        .proxyDown = static_cast<qint64>(proxyDown),
-        .directUp = static_cast<qint64>(directUp),
-        .directDown = static_cast<qint64>(directDown),
-    };
-    m_liveRatesAt.start();
     if (trafficChart == nullptr) return;
     if (coreRunning && values.size() != m_trafficLines.size() * 2) return;
     trafficChart->addPoint(monoMs, coreRunning, values);

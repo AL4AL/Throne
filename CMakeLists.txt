@@ -157,6 +157,7 @@ set(PROJECT_SOURCES
 
         src/stats/traffic/TrafficLooper.cpp
         include/stats/traffic/TrafficLine.hpp
+        include/stats/StatsSink.hpp
         include/stats/traffic/TrafficStatsManager.hpp
         src/stats/traffic/TrafficStatsManager.cpp
 
@@ -213,14 +214,11 @@ set(PROJECT_SOURCES
         src/ui/mainWindow/mainwindow_log.cpp
         src/ui/mainWindow/mainwindow_hotkeys.cpp
         src/ui/mainWindow/mainwindow_profile_lifecycle.cpp
-        src/ui/mainWindow/mainwindow_autoselector.cpp
         src/ui/mainWindow/mainwindow_scanner.cpp
-        src/ui/mainWindow/TestRunner.cpp
         include/ui/mainWindow/MainWindowEngineControl.h
         src/ui/mainWindow/mainwindow_engine_control.cpp
         src/ui/mainWindow/mainwindow_policy.cpp
         include/ui/mainWindow/MainWindowInternal.h
-        include/ui/mainWindow/TestRunner.h
         include/ui/mainwindow.h
         include/ui/mainwindow.ui
         include/ui/widget/StartStopButton.hpp
@@ -708,6 +706,16 @@ set(ENGINE_SOURCES
         src/engine/services/BackupArchive.cpp
         include/engine/services/AssetUpdates.h
         src/engine/services/AssetUpdates.cpp
+        include/engine/services/StatsService.h
+        src/engine/services/StatsService.cpp
+        include/engine/tests/TestObserver.h
+        include/engine/tests/TestRunner.h
+        src/engine/tests/TestRunner.cpp
+        include/engine/autoselector/AutoSelectorController.h
+        src/engine/autoselector/AutoSelectorController.cpp
+        # Last: its <windows.h> macros must not reach a later TU of the same MSVC unity batch.
+        include/engine/supervisor/CoreSupervisor.h
+        src/engine/supervisor/CoreSupervisor.cpp
 )
 list(APPEND PROJECT_SOURCES ${ENGINE_SOURCES})
 
@@ -787,6 +795,9 @@ set(TS_FILES
 set(LUPDATE_OPTIONS
         -locations none -no-obsolete
 )
+# lupdate sees only the target's include paths; without the repo root it cannot resolve EngineTr.h, and files the
+# MainWindowTr::tr strings under a MainWindowTr context instead of MainWindow.
+target_include_directories(Throne PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 qt_add_lupdate(Throne TS_FILES ${TS_FILES} OPTIONS ${LUPDATE_OPTIONS})
 qt_add_lrelease(Throne TS_FILES ${TS_FILES} QM_FILES_OUTPUT_VARIABLE QM_FILES)
 

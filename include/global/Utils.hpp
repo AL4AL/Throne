@@ -60,11 +60,7 @@ enum class MwMessage {
     GroupsChanged,        // arg MwArg::RestartProxy when the edited group changed what a running profile dials
     SubscriptionFinished, // args[0] may carry the job's imported count; MwArg::Quiet skips the import-count line
     SubscriptionNewGroup,
-    // args: { group id, then the id of every profile it deleted or replaced in place }
-    SubscriptionGroupChanged,
     GroupOrderChanged,    // args: ids of the groups a kept sort reordered
-    CoreCrashed,
-    CoreStarted,          // args: { startedProfileId }
 };
 
 // String tokens carried in a MwMessage's argument list.

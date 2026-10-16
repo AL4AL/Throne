@@ -55,7 +55,7 @@ namespace Stats {
     private:
         struct RateProbe {
             qint64 durationMs = 0;
-            // [down, up] per line, the layout of MainWindow::add_traffic_point's values.
+            // [down, up] per line, the layout of TrafficSample::values.
             QVector<qint64> bytes;
         };
 

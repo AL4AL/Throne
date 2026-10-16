@@ -36,6 +36,7 @@
 #include "include/configs/sub/GroupUpdater.hpp"
 #include "include/database/GroupsRepo.h"
 #include "include/database/ProfilesRepo.h"
+#include "include/engine/services/ProfileService.h"
 #include "include/ui/mainWindow/MainWindowInternal.h"
 #include "include/ui/profile/dialog_edit_profile.h"
 #include "include/ui/utils/ProfilesTableModel.h"
@@ -617,6 +618,10 @@ void MainWindow::focusProfilesTable(bool selectFirst) {
 }
 
 void MainWindow::clearUnavailableProfiles(bool confirm, QList<int> profileIDs) {
+    if (!confirm) {
+        Engine::ProfileService::RemoveUnavailable(std::move(profileIDs));
+        return;
+    }
     QList<int> del_ids;
     int remove_display_count = 0;
     QString remove_display;

@@ -5,8 +5,9 @@
 #include "include/api/RPC.h"
 #include "include/api/remote/Router.hpp"
 #include "include/api/remote/Server.hpp"
-// Full definition: MainWindow's destructor lives here and destroys the unique_ptr.
-#include "include/ui/mainWindow/TestRunner.h"
+// Full definitions: MainWindow's destructor lives here and destroys the unique_ptrs.
+#include "include/engine/autoselector/AutoSelectorController.h"
+#include "include/engine/tests/TestRunner.h"
 
 #include <QMenu>
 
@@ -16,14 +17,14 @@
 #include "include/engine/Lifecycle.h"
 #include "include/engine/ThreadCheck.h"
 #include "include/engine/services/AssetUpdates.h"
+#include "include/engine/services/StatsService.h"
+#include "include/engine/supervisor/CoreSupervisor.h"
 #include "include/global/PeriodicRunner.hpp"
 #include "include/global/Logger.hpp"
 #include "include/scanner/IpListUpdater.h"
 #include "include/scanner/ScanManager.h"
-#include "include/stats/autoselector/AutoSelectorMonitor.hpp"
 #include "include/ui/stats/dialog_auto_selector.h"
 #include "include/sys/KillSwitch.hpp"
-#include "include/sys/Process.hpp"
 #include "include/sys/AutoRun.hpp"
 #include "include/sys/UrlScheme.hpp"
 
@@ -45,24 +46,10 @@
 
 #include "include/ui/group/dialog_edit_group.h"
 
-#ifdef Q_OS_WIN
-#include <windows.h>
-// <windows.h> defines SetPort, which under unity builds clobbers Configs::outbound::SetPort.
-#undef SetPort
-#else
 #ifdef Q_OS_LINUX
 #include <QDBusInterface>
 #include <QDBusReply>
-#include <sys/socket.h>
 #endif
-#ifdef Q_OS_MACOS
-#include <sys/socket.h>
-#include <sys/un.h>
-#endif
-#include <unistd.h>
-#endif
-
-#include <QUuid>
 
 #include <QClipboard>
 #include <QScrollArea>
@@ -84,39 +71,6 @@ void UI_InitMainWindow() {
     mainwindow = new MainWindow;
 }
 
-// Caller must hold coreProcessMutex (reads core_process lock-free by design).
-bool MainWindow::verify_core_pid(QLocalSocket *socket) {
-    if (!core_process) return false;
-    qint64 expectedPid = core_process->processId();
-    if (expectedPid <= 0) return false;
-
-#if defined(Q_OS_LINUX)
-    struct ucred cred = {};
-    socklen_t credLen = sizeof(cred);
-    if (getsockopt(static_cast<int>(socket->socketDescriptor()), SOL_SOCKET, SO_PEERCRED, &cred, &credLen) == 0) {
-        return static_cast<qint64>(cred.pid) == expectedPid;
-    }
-    return false;
-#elif defined(Q_OS_MACOS)
-    pid_t pid = 0;
-    socklen_t pidLen = sizeof(pid);
-    if (getsockopt(static_cast<int>(socket->socketDescriptor()), SOL_LOCAL, LOCAL_PEERPID, &pid, &pidLen) == 0) {
-        return static_cast<qint64>(pid) == expectedPid;
-    }
-    return false;
-#elif defined(Q_OS_WIN)
-    ULONG pid = 0;
-    HANDLE hPipe = reinterpret_cast<HANDLE>(static_cast<qintptr>(socket->socketDescriptor()));
-    if (GetNamedPipeClientProcessId(hPipe, &pid)) {
-        return static_cast<qint64>(pid) == expectedPid;
-    }
-    return false;
-#else
-    Q_UNUSED(socket)
-    return true;
-#endif
-}
-
 static bool themeUsesDarkLog(const QString &theme) {
     const auto lower = theme.toLower();
     if (lower.contains("vista") || lower.contains("flatgray") || lower.contains("lightblue") || lower.contains("softpink")) {
@@ -131,6 +85,19 @@ static bool themeUsesDarkLog(const QString &theme) {
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
     mainwindow = this;
     m_engineControl = new MainWindowEngineControl(this);
+    m_stats = new Engine::StatsService(this);
+    connect(m_stats, &Engine::StatsService::trafficLinesChanged, this, &MainWindow::set_traffic_lines);
+    connect(m_stats, &Engine::StatsService::trafficSampled, this, [this](const Stats::TrafficSample &s) {
+        // An idle tick carries no status, and refresh_status("") would redo the whole status bar every second.
+        if (s.coreRunning) refresh_status(s.status);
+        add_traffic_point(s.monoMs, s.coreRunning, s.values, s.proxyDown, s.proxyUp, s.directDown, s.directUp);
+        if (!s.creditedIds.isEmpty()) refresh_proxy_list(s.creditedIds);
+    });
+    connect(m_stats, &Engine::StatsService::trafficStopped, this, [this] { refresh_status("STOP"); });
+    connect(m_stats, &Engine::StatsService::connectionsUpdated, this, &MainWindow::UpdateConnectionList);
+    m_coreSupervisor = new Engine::CoreSupervisor(this);
+    connect(m_coreSupervisor, &Engine::CoreSupervisor::coreStarted, this, &MainWindow::on_core_started);
+    connect(m_coreSupervisor, &Engine::CoreSupervisor::coreGaveUp, this, &MainWindow::on_core_gave_up);
     setAcceptDrops(true);
     SetDialogMessageSink([=,this](MwMessage cmd, const QStringList &args) {
         runOnUiThread([=,this]
@@ -171,11 +138,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         else if (importedCount >= 0) args << Int2String(importedCount);
         dialog_message_impl(MwMessage::SubscriptionFinished, args);
     });
-    connect(engineEvents, &Engine::EngineEvents::subscriptionGroupChanged, this, [this](int groupId, const QList<int> &disturbedProfileIds) {
-        QStringList args{Int2String(groupId)};
-        for (const int id : disturbedProfileIds) args << Int2String(id);
-        dialog_message_impl(MwMessage::SubscriptionGroupChanged, args);
-    });
     connect(engineEvents, &Engine::EngineEvents::subscriptionDiff, this, [](const QString &title, const QString &body) {
         MessageBoxScrollable(title, body);
     });
@@ -183,9 +145,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         QStringList args;
         for (const int id : groupIds) args << Int2String(id);
         dialog_message_impl(MwMessage::GroupOrderChanged, args);
-    });
-    connect(engineEvents, &Engine::EngineEvents::extraCoreExited, this, [this] {
-        dialog_message_impl(MwMessage::CoreCrashed, {});
     });
     connect(engineEvents, &Engine::EngineEvents::groupsChanged, this, [this] {
         dialog_message_impl(MwMessage::GroupsChanged, {});
@@ -198,6 +157,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         syncSettingsMirrors();
     });
     Engine::Lifecycle::SetStopHandler([this](bool crash, bool block, bool manual, bool interactive) { profile_stop(crash, block, manual, interactive); });
+    testRunner = std::make_unique<Engine::TestRunner>(policy(), this, [this] { return runningSnapshot(); });
+    m_autoSelector = std::make_unique<Engine::AutoSelectorController>(engineControl(), testRunner.get());
+    // In this order: the traffic and connection loops spawn before the selector monitor, as before.
+    connect(m_coreSupervisor, &Engine::CoreSupervisor::rpcConnected, m_stats, &Engine::StatsService::startLoops);
+    connect(m_coreSupervisor, &Engine::CoreSupervisor::rpcConnected, m_autoSelector.get(), &Engine::AutoSelectorController::startMonitorLoop);
 
     AutoRun_FixTaskIfNeeded();
     AutoRun_MigrateIfNeeded();
@@ -258,58 +222,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     runOnNewThread([=, this] {GetDeviceDetails(); });
 
-    auto core_path = Configs::FindCoreRealPath();
+    // On failure the supervisor posts the notice, and start() and every profile start refuse to run.
+    m_coreSupervisor->listen();
 
-    bool coreDebugMode = (Configs::dataManager->settingsRepo->log_level == "debug");
-
-    Configs::dataManager->settingsRepo->core_socket_name =
-        "throneIPC-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
-    core_server = new QLocalServer(this);
-    core_server->setSocketOptions(QLocalServer::UserAccessOption);
-    if (!core_server->listen(Configs::dataManager->settingsRepo->core_socket_name)) {
-        qWarning() << "Failed to start IPC server:" << core_server->errorString();
-        qApp->quit();
-    }
-
-    connect(core_server, &QLocalServer::newConnection, this, [=, this]() {
-        ENGINE_CHECK_MAIN_THREAD();
-        auto socket = core_server->nextPendingConnection();
-        int profileId = -1;
-        {
-            // Hold coreProcessMutex: DS_cores may still be constructing core_process.
-            QMutexLocker lock(&coreProcessMutex);
-            if (!verify_core_pid(socket)) {
-                MW_show_log("[Warn] IPC connection from unexpected process rejected");
-                socket->close();
-                socket->deleteLater();
-                return;
-            }
-            if (core_process) {
-                profileId = core_process->start_profile_when_core_is_up;
-                core_process->start_profile_when_core_is_up = -1;
-            }
-        }
-        setup_rpc(socket);
-        Configs::dataManager->settingsRepo->core_running = true;
-        MW_dialog_message(MwMessage::CoreStarted, {Int2String(profileId)});
-    });
-
-    // Must precede the first CoreStarted, or a remembered profile would start before the guard is even arming.
+    // Must precede the first coreStarted, or a remembered profile would start before the guard is even arming.
     Sys::KillSwitch::instance()->apply();
 
-    auto socketFullName = core_server->fullServerName();
-    runOnThread(
-        [=, this] {
-            QMutexLocker lock(&coreProcessMutex);
-            core_process = new Configs_sys::CoreProcess(core_path, socketFullName, coreDebugMode);
-            if (Configs::dataManager->settingsRepo->remember_enable &&
-                Configs::dataManager->settingsRepo->remember_id >= 0) {
-                core_process->start_profile_when_core_is_up =
-                    Configs::dataManager->settingsRepo->remember_id;
-            }
-            core_process->Start();
-        },
-        DS_cores);
+    const auto &startSettings = Configs::dataManager->settingsRepo;
+    m_coreSupervisor->start(startSettings->remember_enable && startSettings->remember_id >= 0 ? startSettings->remember_id : -1);
 
     if (!Configs::dataManager->settingsRepo->font.isEmpty()) {
         auto font = qApp->font();
@@ -323,7 +243,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     }
 
     parallelCoreCallPool->setMaxThreadCount(10);
-    testRunner = std::make_unique<TestRunner>(this);
     Subscription::updater()->SetUrlTester([this](const QList<int> &profileIDs, bool interactive, const Subscription::GroupUpdater::Finish &done) {
         testRunner->queueUrlTests(profileIDs, done, interactive);
     });
@@ -1038,19 +957,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(t, &QTimer::timeout, this, [=,this]() { refresh_status(); });
     t->start(2000);
 
-    t = new QTimer;
-    connect(t, &QTimer::timeout, this, [&] { Configs_sys::logCounter.fetchAndStoreRelaxed(0); });
-    t->start(1000);
-
     m_proxyListRefreshDebounce = new QTimer(this);
     m_proxyListRefreshDebounce->setSingleShot(true);
     connect(m_proxyListRefreshDebounce, &QTimer::timeout, this, [this] { refresh_proxy_list({}, false); });
 
-    // The selector monitor emits from its own poll thread.
-    connect(Stats::autoSelectorMonitor, &Stats::AutoSelectorMonitor::poolExhausted, this,
-            [this](int profileID) { on_auto_selector_exhausted(profileID); }, Qt::QueuedConnection);
-    connect(Stats::autoSelectorMonitor, &Stats::AutoSelectorMonitor::updated, this,
-            [this] { refresh_auto_selector_view(); }, Qt::QueuedConnection);
+    connect(m_autoSelector.get(), &Engine::AutoSelectorController::statusChanged, this, [this] { refresh_auto_selector_view(); });
 
     auto* scanManager = Scanner::ScanManager::instance();
     connect(scanManager, &Scanner::ScanManager::progressChanged, this,

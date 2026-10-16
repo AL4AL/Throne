@@ -6,6 +6,10 @@
 #include <QString>
 #include <QStringList>
 
+namespace Engine {
+    class EnginePolicy;
+}
+
 namespace Engine::AssetUpdates {
     struct RuleSetResult {
         bool coreReachable = false;
@@ -79,4 +83,8 @@ namespace Engine::AssetUpdates {
 
     // Any thread; classifies a core error the way handleXrayGeoAssetError did.
     GeoError ClassifyGeoError(const QString &coreError);
+
+    // Any thread; returns whether coreError is a geo-asset one. Without prompt it only logs; with it, the policy is asked
+    // on the main thread whether to fetch the missing files. policy outlives the prompt.
+    bool HandleXrayGeoError(EnginePolicy *policy, const QString &coreError, const QString &contextName, bool prompt);
 } // namespace Engine::AssetUpdates

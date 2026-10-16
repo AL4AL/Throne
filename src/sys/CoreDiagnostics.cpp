@@ -5,7 +5,6 @@
 #include "include/database/ProfilesRepo.h"
 #include "include/global/Configs.hpp"
 #include "include/global/Logger.hpp"
-#include "include/ui/mainwindow.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -270,7 +269,7 @@ namespace Sys {
         }
         if (notice_) notice_->close();
         auto *box = new QMessageBox(saved ? QMessageBox::Information : QMessageBox::Warning,
-                                    tr("Performance profile"), text, QMessageBox::NoButton, GetMainWindow());
+                                    tr("Performance profile"), text, QMessageBox::NoButton, mainwindow);
         box->setAttribute(Qt::WA_DeleteOnClose);
         box->setWindowModality(Qt::NonModal);
         if (saved) {

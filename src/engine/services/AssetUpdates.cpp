@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <atomic>
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QFileInfo>
 #include <QRegularExpression>
 
 #include "include/api/RPC.h"
+#include "include/engine/EnginePolicy.h"
+#include "include/engine/EngineTr.h"
 #include "include/engine/ThreadCheck.h"
 #include "include/global/Configs.hpp"
 #include "include/global/HTTPRequestHelper.hpp"
@@ -20,6 +23,8 @@ namespace Engine::AssetUpdates {
         std::atomic<bool> assetRuleSetBusy{false};
         // Bits of the GeoFiles being downloaded; only the main thread changes it.
         std::atomic<unsigned> assetGeoInFlight{0};
+        // A geo prompt is pending or open; main thread only.
+        bool assetXrayGeoPromptBusy = false;
 
         unsigned assetGeoBit(GeoFile file) {
             return 1u << static_cast<unsigned>(file);
@@ -172,5 +177,60 @@ namespace Engine::AssetUpdates {
         const auto match = categoryRe.match(coreError);
         if (match.hasMatch()) geo.needed = QStringLiteral("%1:%2").arg(ruleType, match.captured(1));
         return geo;
+    }
+
+    bool HandleXrayGeoError(EnginePolicy *policy, const QString &coreError, const QString &contextName, bool prompt) {
+        const auto classified = ClassifyGeoError(coreError);
+        if (!classified.isGeo) return false;
+        if (!prompt) {
+            if (classified.missingCategory) {
+                const QString needed = classified.needed.isEmpty() ? MainWindowTr::tr("a required category") : classified.needed;
+                MW_show_log(MainWindowTr::tr("The Xray config \"%1\" needs \"%2\", but the installed %3 does not contain it.")
+                                .arg(contextName, needed, classified.whichFile));
+            } else {
+                QStringList missing;
+                if (classified.refGeoip) missing << QStringLiteral("geoip.dat");
+                if (classified.refGeosite) missing << QStringLiteral("geosite.dat");
+                MW_show_log(MainWindowTr::tr("The Xray config \"%1\" needs geo data files that are not installed: %2. Download them under Basic Settings > Miscellaneous > Xray Geo Assets.")
+                                .arg(contextName, missing.join(QStringLiteral(", "))));
+            }
+            return true;
+        }
+
+        runOnUiThread([=] {
+            if (assetXrayGeoPromptBusy || GeoUpdateRunning()) return;
+            assetXrayGeoPromptBusy = true;
+            setTimeout([=] {
+                const auto geo = ClassifyGeoError(coreError);
+                if (geo.missingCategory) {
+                    const QString needed = geo.needed.isEmpty() ? MainWindowTr::tr("a required category") : geo.needed;
+                    policy->geoAssetMissingCategory(contextName, needed, geo.whichFile);
+                    assetXrayGeoPromptBusy = false;
+                    return;
+                }
+
+                const bool confirmed = policy->confirmGeoAssetDownload(contextName);
+                assetXrayGeoPromptBusy = false;
+                if (!confirmed) return;
+
+                GeoRequest request;
+                request.files.clear();
+                for (const auto &status : GeoStatus()) {
+                    if (!status.present) request.files << status.file;
+                }
+                request.onlyMissing = true;
+                const bool started = UpdateGeoAssets(request, [policy](const QList<GeoFileResult> &results) {
+                    QString dlErr;
+                    for (const auto &result : results) {
+                        if (!result.error.isEmpty()) dlErr += result.fileName + ": " + result.error + "\n";
+                    }
+                    if (dlErr.isEmpty()) MW_show_log(MainWindowTr::tr("Downloaded Xray geo asset files."));
+                    policy->geoAssetDownloadFinished(dlErr);
+                });
+                // An API request may have started a download while the question was open.
+                if (!started) MW_show_log(MainWindowTr::tr("Geo asset files are already being downloaded."));
+            }, QCoreApplication::instance(), 300);
+        });
+        return true;
     }
 } // namespace Engine::AssetUpdates
