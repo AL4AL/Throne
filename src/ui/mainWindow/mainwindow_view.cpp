@@ -74,15 +74,35 @@ void MainWindow::UpdateDataView(bool force)
 void MainWindow::noteRestartNeeded(const QString& reason)
 {
     if (Configs::dataManager->settingsRepo->started_id < 0) return;
-    dataViewHtmlGenerator_.addPendingRestartReason(reason);
+    QString trimmed = reason.trimmed();
+    if (trimmed.isEmpty()) trimmed = QObject::tr("Settings");
+    const auto before = m_restartReasons.size();
+    if (!m_restartReasons.contains(trimmed)) {
+        if (m_restartReasons.size() < 4) {
+            m_restartReasons << trimmed;
+        } else if (m_restartReasons.last() != QStringLiteral("...")) {
+            m_restartReasons << QStringLiteral("...");
+        }
+    }
+    if (m_restartReasons.size() != before) {
+        dataViewHtmlGenerator_.setPendingRestartReasons(m_restartReasons);
+        emit restart_pending_changed();
+    }
     UpdateDataView(true);
 }
 
 void MainWindow::clearRestartNeeded()
 {
-    if (!dataViewHtmlGenerator_.hasPendingRestart()) return;
-    dataViewHtmlGenerator_.clearPendingRestart();
+    if (m_restartReasons.isEmpty()) return;
+    m_restartReasons.clear();
+    dataViewHtmlGenerator_.setPendingRestartReasons({});
+    emit restart_pending_changed();
     UpdateDataView(true);
+}
+
+QStringList MainWindow::pendingRestartReasons() const
+{
+    return m_restartReasons;
 }
 
 void MainWindow::setDownloadReport(const DownloadProgressReport& report, bool show)
@@ -223,12 +243,16 @@ void MainWindow::refresh_status(const QString &traffic_update) {
     refresh_startstop_button();
 }
 
-void MainWindow::refresh_startstop_button() {
-    // Every change to the start/stop flags or `running` is followed by a call here, on the UI thread.
+void MainWindow::sync_connection_state() {
     if (const auto connState = connection_state(); connState != m_lastConnectionState) {
         m_lastConnectionState = connState;
         emit connection_state_changed(connState);
     }
+}
+
+void MainWindow::refresh_startstop_button() {
+    // Every change to the start/stop flags or `running` is followed by a call here, on the UI thread.
+    sync_connection_state();
 
     auto *btn = ui->toolButton_startstop;
     if (btn == nullptr) return;

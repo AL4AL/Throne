@@ -283,6 +283,51 @@ void MainWindow::import_text(const QString &text) {
     Subscription::updater()->ImportText(content);
 }
 
+void MainWindow::applySettingsChange(const QStringList &flags, bool interactive) {
+    ENGINE_CHECK_MAIN_THREAD();
+    const auto changed = [&](const QString &flag) { return flags.contains(flag); };
+    auto &settings = Configs::dataManager->settingsRepo;
+
+    if (changed(MwArg::ChoosePort)) {
+        settings->inbound_socks_port = MkPort(settings->inbound_address);
+        if (settings->spmode_system_proxy) {
+            const ModeChange change{.interactive = interactive};
+            set_spmode_system_proxy(false, change);
+            set_spmode_system_proxy(true, change);
+        }
+    }
+    if (changed(MwArg::DisableAdmin)) {
+        AutoRun_FixTaskIfNeeded();
+    }
+    auto suggestRestartProxy = settings->Save();
+    Throne::PeriodicRunner::instance()->CheckNow();
+    if (changed(MwArg::KillSwitch) || changed(MwArg::Vpn)) Sys::KillSwitch::instance()->apply();
+    if (changed(MwArg::RemoteApi)) RemoteApi::Server::instance()->apply(RemoteApi::ConfigFromSettings());
+    if (changed(MwArg::Route)) {
+        settings->Save();
+        suggestRestartProxy = true;
+    }
+    if (changed(MwArg::NeedRestart)) {
+        suggestRestartProxy = false;
+    }
+    if (changed(MwArg::Vpn) && settings->spmode_vpn) {
+        if (interactive) policy()->settingsNeedTunRestart();
+        else MW_show_log(tr("Tun Settings changed") + ": " + tr("Restart Tun to take effect."));
+    }
+    if (changed(MwArg::ChoosePort) || suggestRestartProxy) {
+        noteRestartNeeded(changed(MwArg::Route) ? tr("Routing") : tr("Settings"));
+    }
+    refresh_status();
+    if (changed(MwArg::NeedRestart)) {
+        if (!interactive) {
+            MW_show_log(tr("Settings changed") + ": " + tr("Restart the program to take effect."));
+        } else if (policy()->confirmRestartProgram()) {
+            this->exit_reason = ExitReason::Restart;
+            on_menu_exit_triggered();
+        }
+    }
+}
+
 void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
     ENGINE_CHECK_MAIN_THREAD();
     const auto changed = [&](const QString &flag) { return args.contains(flag); };
@@ -307,16 +352,6 @@ void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
         if (changed(MwArg::DisableTray)) {
             tray->setVisible(!settings->disable_tray);
         }
-        if (changed(MwArg::ChoosePort)) {
-            settings->inbound_socks_port = MkPort(settings->inbound_address);
-            if (settings->spmode_system_proxy) {
-                set_spmode_system_proxy(false);
-                set_spmode_system_proxy(true);
-            }
-        }
-        if (changed(MwArg::DisableAdmin)) {
-            AutoRun_FixTaskIfNeeded();
-        }
         if (changed(MwArg::ProfileListDisplay)) {
             if (auto group = Configs::dataManager->groupsRepo->CurrentGroup();
                 group && group->calculated_column_width.size() > ProfilesTableModel::ColType)
@@ -330,29 +365,7 @@ void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
             }
             refresh_proxy_list({}, true);
         }
-        auto suggestRestartProxy = settings->Save();
-        Throne::PeriodicRunner::instance()->CheckNow();
-        if (changed(MwArg::KillSwitch) || changed(MwArg::Vpn)) Sys::KillSwitch::instance()->apply();
-        if (changed(MwArg::RemoteApi)) RemoteApi::Server::instance()->apply(RemoteApi::ConfigFromSettings());
-        if (changed(MwArg::Route)) {
-            settings->Save();
-            suggestRestartProxy = true;
-        }
-        if (changed(MwArg::NeedRestart)) {
-            suggestRestartProxy = false;
-        }
-        if (changed(MwArg::Vpn) && settings->spmode_vpn) {
-            MessageBoxWarning(tr("Tun Settings changed"), tr("Restart Tun to take effect."));
-        }
-        if (changed(MwArg::ChoosePort) || suggestRestartProxy) {
-            noteRestartNeeded(changed(MwArg::Route) ? tr("Routing") : tr("Settings"));
-        }
-        refresh_status();
-        if (changed(MwArg::NeedRestart) &&
-            QMessageBox::warning(GetMessageBoxParent(), tr("Settings changed"), tr("Restart the program to take effect."), QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes) {
-            this->exit_reason = ExitReason::Restart;
-            on_menu_exit_triggered();
-        }
+        applySettingsChange(args, true);
         break;
     }
     case MwMessage::RestartProgram:

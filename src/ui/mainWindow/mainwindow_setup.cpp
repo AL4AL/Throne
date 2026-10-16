@@ -1,6 +1,7 @@
 #include "include/ui/mainwindow.h"
 
 #include "include/ui/mainWindow/MainWindowInternal.h"
+#include "include/ui/mainWindow/MainWindowEngineControl.h"
 #include "include/api/RPC.h"
 #include "include/api/remote/Router.hpp"
 #include "include/api/remote/Server.hpp"
@@ -128,6 +129,7 @@ static bool themeUsesDarkLog(const QString &theme) {
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
     mainwindow = this;
+    m_engineControl = new MainWindowEngineControl(this);
     setAcceptDrops(true);
     SetDialogMessageSink([=,this](MwMessage cmd, const QStringList &args) {
         runOnUiThread([=,this]
@@ -1092,7 +1094,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         }
     });
 
-    const QPointer<RemoteApi::Router> apiRouter = new RemoteApi::Router(this);
+    const QPointer<RemoteApi::Router> apiRouter = new RemoteApi::Router(engineControl(), this);
     RemoteApi::Server::instance()->setDispatcher([apiRouter](const RemoteApi::Request &request, const RemoteApi::Responder &respond) {
         if (apiRouter) apiRouter->dispatch(request, respond);
         else respond(RemoteApi::Response::Error(503, "exiting", "Throne is shutting down"));

@@ -40,6 +40,8 @@
 #include <QLocalSocket>
 
 #include "include/database/entities/GroupSort.h"
+#include "include/engine/EnginePolicy.h"
+#include "include/engine/EngineTypes.h"
 #include "include/ui/setting/Icon.hpp"
 #include "include/ui/utils/DataViewHtmlGenerator.h"
 #include "include/ui/utils/GuiUtils.hpp"
@@ -55,8 +57,8 @@ namespace Configs {
     enum simpleAction : int;
 }
 
-namespace RemoteApi {
-    class Router;
+namespace Engine {
+    class EngineControl;
 }
 
 class QMessageBox;
@@ -64,10 +66,10 @@ class TrayProfileSelector;
 class TrayOtpCodes;
 class GlobalHotkeys;
 class TestRunner;
+class MainWindowEngineControl;
 class DialogVpnAuth;
 class DialogScanner;
 class DialogIpLists;
-struct VpnAuthChallenge;
 
 struct VpnEndpointState {
     QString tag;
@@ -90,55 +92,24 @@ enum class RefreshAnchor {
     Removal,
 };
 
-enum class ExitReason {
-    None,
-    RunUpdater,
-    Restart,
-    RestartWithTun,
-    RestartElevated,
-};
+using ExitReason = Engine::ExitReason;
 
-class MainWindow : public QMainWindow {
+class MainWindow : public QMainWindow, public Engine::EnginePolicy {
     Q_OBJECT
 
 public:
-    enum class ConnectionState { Idle, Connecting, Running, Stopping };
-
-    enum class StartOutcome {
-        Started,
-        Exiting,
-        NotFound,
-        GroupUnavailable,
-        KillSwitchInactive,
-        Superseded,
-        CoreUnavailable,
-        BuildFailed,
-        Busy,
-        ExtraCoreBlocked,
-        GeoAssetsMissing,
-        StrictRouteUnavailable,
-        TunFailed,
-        StartFailed,
-    };
-
-    struct StartRequest {
-        int profileId = -1;
-        // Unattended callers get every failure through start_finished and the log, never a dialog.
-        bool interactive = true;
-        quint64 serial = 0;
-    };
-
-    struct ModeChange {
-        bool save = true;
-        // Unattended callers get no dialog or elevation prompt, and their restart is an unattended StartRequest carrying restartSerial.
-        bool interactive = true;
-        bool restart = true;
-        quint64 restartSerial = 0;
-    };
+    using ConnectionState = Engine::ConnectionState;
+    using StartOutcome = Engine::StartOutcome;
+    using StartRequest = Engine::StartRequest;
+    using ModeChange = Engine::ModeChange;
 
     explicit MainWindow(QWidget *parent = nullptr);
 
     ~MainWindow() override;
+
+    Engine::EngineControl *engineControl() const { return m_engineControl; }
+
+    Engine::EnginePolicy *policy() { return this; }
 
     qint64 GetCorePid();
     QString GetRunningConfigName();
@@ -199,6 +170,9 @@ public:
 
     bool set_spmode_vpn(bool enable, const ModeChange &change);
 
+    // Engine half of MwMessage::UpdateSettings; its dialogs appear only when interactive.
+    void applySettingsChange(const QStringList &flags, bool interactive);
+
     bool get_elevated_permissions(bool interactive = true);
 
     void start_select_mode(QObject *context, const std::function<void(int)> &callback);
@@ -221,6 +195,8 @@ public:
 
     void clearRestartNeeded();
 
+    QStringList pendingRestartReasons() const;
+
     void refresh_auto_selector_view();
 
     class DialogAutoSelector *m_autoSelectorDialog = nullptr;
@@ -237,11 +213,13 @@ signals:
 
     void profile_selected(int id);
 
-    void connection_state_changed(MainWindow::ConnectionState state);
+    void connection_state_changed(Engine::ConnectionState state);
 
-    void start_finished(quint64 serial, int profileId, MainWindow::StartOutcome outcome, const QString &error);
+    void start_finished(quint64 serial, int profileId, Engine::StartOutcome outcome, const QString &error);
 
     void stop_finished(int profileId);
+
+    void restart_pending_changed();
 
 public slots:
 
@@ -376,17 +354,15 @@ private:
     QAction *m_trafficStatsChartAction = nullptr;
     // Set while profile_start stops the running profile, so that stop is marked as part of the switch.
     std::atomic<bool> m_switchingProfile = false;
-    struct LiveRates {
-        qint64 proxyUp = 0;
-        qint64 proxyDown = 0;
-        qint64 directUp = 0;
-        qint64 directDown = 0;
-    };
+    using LiveRates = Engine::LiveRates;
     LiveRates m_liveRates;
     QElapsedTimer m_liveRatesAt;
     class RuntimeStatsWidget *runtimeStatsWidget = nullptr;
     std::atomic<qint64> lastUpdatedMs = QDateTime::currentMSecsSinceEpoch();
     DataViewHtmlGenerator dataViewHtmlGenerator_;
+    // UI thread only; the data view renders a copy.
+    QStringList m_restartReasons;
+    Engine::EngineControl *m_engineControl = nullptr;
 
     QList<QShortcut*> hiddenMenuShortcuts;
     GlobalHotkeys *globalHotkeys = nullptr;
@@ -469,6 +445,8 @@ private:
 
     QList<int> get_now_selected_list();
     void refresh_startstop_button();
+
+    void sync_connection_state();
 
     QList<int> get_selected_or_group();
 
@@ -619,8 +597,6 @@ private:
 
     void kill_switch_state_changed();
 
-    void show_kill_switch_problem();
-
     void show_startstop_menu();
 
     void confirm_disable_kill_switch();
@@ -711,8 +687,50 @@ private:
 
     void refreshConnectionIcons();
 
+    // EnginePolicy, in mainwindow_policy.cpp; reached through policy().
+    void geoAssetMissingCategory(const QString &contextName, const QString &needed, const QString &whichFile) override;
+
+    bool confirmGeoAssetDownload(const QString &contextName) override;
+
+    void geoAssetDownloadFinished(const QString &error) override;
+
+    void killSwitchProblem() override;
+
+    void killSwitchProblemResolved() override;
+
+    void extraCoreNotPermitted() override;
+
+    void startFailed(const StartRequest &request, StartOutcome outcome, const QString &title, const QString &error) override;
+
+    void strictRouteUnavailable(const QString &error) override;
+
+    bool offerCoreReset(const QString &error) override;
+
+    void stopFailed(const QString &error) override;
+
+    Engine::SlowOperation slowOperation(Engine::SlowOperationKind kind, int delayMs) override;
+
+    bool requestCorePrivileges() override;
+
+    void systemProxyNeedsMixedInbound() override;
+
+    bool vpnPromptOpen() const override;
+
+    void vpnChallenge(const VpnAuthChallenge &challenge) override;
+
+    void vpnCredentialsRejected(int profileId, const VpnAuthChallenge &challenge,
+                                const std::function<void(const QString &username, const QString &password)> &retryWith) override;
+
+    void vpnChallengesCleared() override;
+
+    void settingsNeedTunRestart() override;
+
+    bool confirmRestartProgram() override;
+
+    void testSessionBusy(const QString &text) override;
+
     friend class TestRunner;
-    friend class RemoteApi::Router;
+    friend class MainWindowEngineControl;
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;

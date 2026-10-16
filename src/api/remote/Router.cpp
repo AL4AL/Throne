@@ -1,8 +1,6 @@
 #include "include/api/remote/Router.hpp"
 
 #include "NkrVersion.h"
-#include "include/ui/mainwindow.h"
-#include "include/ui/mainWindow/TestRunner.h"
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -20,6 +18,8 @@
 #include "include/database/ProfilesRepo.h"
 #include "include/database/RoutesRepo.h"
 #include "include/database/TrafficStatsRepo.h"
+#include "include/engine/EngineControl.h"
+#include "include/global/Configs.hpp"
 #include "include/stats/traffic/TrafficStatsManager.hpp"
 #include "include/sys/KillSwitch.hpp"
 
@@ -70,12 +70,12 @@ namespace RemoteApi::RouterImpl {
         return profile.latency_at >= requestedAt || requestedAt - profile.latency_at < maxAge;
     }
 
-    QString connectionStateName(MainWindow::ConnectionState state) {
+    QString connectionStateName(Engine::ConnectionState state) {
         switch (state) {
-            case MainWindow::ConnectionState::Connecting: return QStringLiteral("connecting");
-            case MainWindow::ConnectionState::Running: return QStringLiteral("running");
-            case MainWindow::ConnectionState::Stopping: return QStringLiteral("stopping");
-            case MainWindow::ConnectionState::Idle: break;
+            case Engine::ConnectionState::Connecting: return QStringLiteral("connecting");
+            case Engine::ConnectionState::Running: return QStringLiteral("running");
+            case Engine::ConnectionState::Stopping: return QStringLiteral("stopping");
+            case Engine::ConnectionState::Idle: break;
         }
         return QStringLiteral("idle");
     }
@@ -95,29 +95,29 @@ namespace RemoteApi::RouterImpl {
         return Response::Error(409, QStringLiteral("busy"), QStringLiteral("A profile is starting or stopping"));
     }
 
-    Response startFailure(MainWindow::StartOutcome outcome, const QString &error) {
+    Response startFailure(Engine::StartOutcome outcome, const QString &error) {
         const auto make = [&error](int status, const char *code, const char *fallback) {
             return Response::Error(status, QString::fromLatin1(code), error.isEmpty() ? QString::fromLatin1(fallback) : error);
         };
         switch (outcome) {
-            case MainWindow::StartOutcome::Exiting: return make(503, "exiting", "Throne is shutting down");
-            case MainWindow::StartOutcome::NotFound: return make(404, "not_found", "The profile does not exist");
-            case MainWindow::StartOutcome::GroupUnavailable: return make(409, "group_archived", "The profile's group is archived");
-            case MainWindow::StartOutcome::KillSwitchInactive:
+            case Engine::StartOutcome::Exiting: return make(503, "exiting", "Throne is shutting down");
+            case Engine::StartOutcome::NotFound: return make(404, "not_found", "The profile does not exist");
+            case Engine::StartOutcome::GroupUnavailable: return make(409, "group_archived", "The profile's group is archived");
+            case Engine::StartOutcome::KillSwitchInactive:
                 return make(409, "kill_switch_inactive", "The kill switch is on but not working, so Throne does not start profiles");
-            case MainWindow::StartOutcome::Superseded: return make(409, "superseded", "A newer start replaced this one before it ran");
-            case MainWindow::StartOutcome::CoreUnavailable: return make(503, "core_unavailable", "Throne's core process is not reachable");
-            case MainWindow::StartOutcome::BuildFailed: return make(422, "build_failed", "Throne could not build the profile's configuration");
-            case MainWindow::StartOutcome::Busy: return make(409, "busy", "Another profile is starting or stopping");
-            case MainWindow::StartOutcome::ExtraCoreBlocked:
+            case Engine::StartOutcome::Superseded: return make(409, "superseded", "A newer start replaced this one before it ran");
+            case Engine::StartOutcome::CoreUnavailable: return make(503, "core_unavailable", "Throne's core process is not reachable");
+            case Engine::StartOutcome::BuildFailed: return make(422, "build_failed", "Throne could not build the profile's configuration");
+            case Engine::StartOutcome::Busy: return make(409, "busy", "Another profile is starting or stopping");
+            case Engine::StartOutcome::ExtraCoreBlocked:
                 return make(409, "kill_switch_blocked", "The kill switch could not allow the profile's extra core");
-            case MainWindow::StartOutcome::GeoAssetsMissing:
+            case Engine::StartOutcome::GeoAssetsMissing:
                 return make(422, "geo_assets_missing", "The profile needs geoip or geosite files that are missing");
-            case MainWindow::StartOutcome::StrictRouteUnavailable:
+            case Engine::StartOutcome::StrictRouteUnavailable:
                 return make(422, "strict_route_unavailable", "Windows could not enable strict routing");
-            case MainWindow::StartOutcome::TunFailed: return make(422, "tun_failed", "The Tun interface could not be configured");
-            case MainWindow::StartOutcome::StartFailed:
-            case MainWindow::StartOutcome::Started: break;
+            case Engine::StartOutcome::TunFailed: return make(422, "tun_failed", "The Tun interface could not be configured");
+            case Engine::StartOutcome::StartFailed:
+            case Engine::StartOutcome::Started: break;
         }
         return make(422, "start_failed", "The core rejected the configuration");
     }
@@ -132,19 +132,19 @@ namespace RemoteApi::RouterImpl {
 }
 
 namespace RemoteApi {
-    Router::Router(MainWindow *mw) : QObject(mw), mw_(mw) {
-        connect(mw, &MainWindow::start_finished, this,
-                [this](quint64 serial, int, MainWindow::StartOutcome outcome, const QString &error) {
+    Router::Router(Engine::EngineControl *engine, QObject *parent) : QObject(parent), engine_(engine) {
+        connect(engine, &Engine::EngineControl::startFinished, this,
+                [this](quint64 serial, int, Engine::StartOutcome outcome, const QString &error) {
                     const auto callback = starts_.take(serial);
                     if (!callback) return;
-                    if (outcome == MainWindow::StartOutcome::Started) callback(std::nullopt);
+                    if (outcome == Engine::StartOutcome::Started) callback(std::nullopt);
                     else callback(RouterImpl::startFailure(outcome, error));
                 });
-        connect(mw, &MainWindow::stop_finished, this, [this](int) {
+        connect(engine, &Engine::EngineControl::stopFinished, this, [this](int) {
             for (const auto &callback : std::exchange(stops_, {})) callback();
         });
-        connect(mw, &MainWindow::connection_state_changed, this, [this](MainWindow::ConnectionState state) {
-            if (state == MainWindow::ConnectionState::Connecting) return;
+        connect(engine, &Engine::EngineControl::connectionStateChanged, this, [this](Engine::ConnectionState state) {
+            if (state == Engine::ConnectionState::Connecting) return;
             for (const auto &waiter : std::exchange(settling_, {})) answer(waiter, Response::Ok(statusJson()));
         });
     }
@@ -372,18 +372,18 @@ namespace RemoteApi {
     }
 
     bool Router::connectionBusy() const {
-        const auto state = mw_->connection_state();
-        return state == MainWindow::ConnectionState::Connecting || state == MainWindow::ConnectionState::Stopping;
+        const auto state = engine_->connectionState();
+        return state == Engine::ConnectionState::Connecting || state == Engine::ConnectionState::Stopping;
     }
 
     QJsonObject Router::statusJson() const {
         const auto &settings = Configs::dataManager->settingsRepo;
-        const auto running = mw_->runningSnapshot();
+        const auto running = engine_->runningSnapshot();
         const auto route = Configs::dataManager->routesRepo->GetRouteProfile(settings->current_route_id);
         return {
-            {"state", RouterImpl::connectionStateName(mw_->connection_state())},
+            {"state", RouterImpl::connectionStateName(engine_->connectionState())},
             {"profile", running != nullptr ? QJsonValue(profileJson(running)) : QJsonValue()},
-            {"last_profile_id", mw_->resolve_last_profile()},
+            {"last_profile_id", engine_->resolveLastProfile()},
             {"tun", settings->spmode_vpn},
             {"system_proxy", settings->spmode_system_proxy},
             {"route", route != nullptr ? QJsonValue(routeJson(*route)) : QJsonValue()},
@@ -399,7 +399,7 @@ namespace RemoteApi {
     }
 
     QJsonObject Router::profileJson(const std::shared_ptr<Configs::Profile> &profile) const {
-        const auto running = mw_->runningSnapshot();
+        const auto running = engine_->runningSnapshot();
         int latency = profile->latency;
         if (latency < 0 && latency != Configs::kLatencyConnectOnly) latency = -1;
         return {
@@ -481,7 +481,7 @@ namespace RemoteApi {
         if (waiter->done) return;
         if (failure) {
             answer(waiter, *failure);
-        } else if (mw_->connection_state() == MainWindow::ConnectionState::Connecting) {
+        } else if (engine_->connectionState() == Engine::ConnectionState::Connecting) {
             settling_.append(waiter);
         } else {
             answer(waiter, Response::Ok(statusJson()));
@@ -489,7 +489,7 @@ namespace RemoteApi {
     }
 
     void Router::applyWithRestart(const WaitOptions &options, const Responder &respond, const std::function<bool(quint64)> &apply) {
-        const quint64 serial = mw_->next_start_serial();
+        const quint64 serial = engine_->nextStartSerial();
         WaiterPtr waiter;
         if (options.wait) {
             waiter = makeWaiter(respond, options.timeoutMs, [this] { return accepted(); });
@@ -507,13 +507,13 @@ namespace RemoteApi {
 
     std::optional<Response> Router::launch(int profileId, bool restart, const WaiterPtr &waiter) {
         if (connectionBusy()) return RouterImpl::busyConnection();
-        const auto running = mw_->runningSnapshot();
+        const auto running = engine_->runningSnapshot();
         if (!restart && running != nullptr && running->id == profileId) return Response::Ok(statusJson());
-        const quint64 serial = mw_->next_start_serial();
+        const quint64 serial = engine_->nextStartSerial();
         if (waiter != nullptr) {
             starts_.insert(serial, [this, waiter](const std::optional<Response> &failure) { completeStart(waiter, failure); });
         }
-        mw_->profile_start(MainWindow::StartRequest{profileId, false, serial});
+        engine_->start(Engine::StartRequest{profileId, false, serial});
         return std::nullopt;
     }
 
@@ -629,7 +629,7 @@ namespace RemoteApi {
             }
             id = *profileId;
         } else if (select == QStringLiteral("last")) {
-            id = mw_->resolve_last_profile();
+            id = engine_->resolveLastProfile();
             if (id < 0) {
                 respond(notFound(QStringLiteral("Throne has no profile to resume")));
                 return;
@@ -702,7 +702,7 @@ namespace RemoteApi {
         } else {
             MW_show_log(tr("[API] Testing %n profile(s) to find the lowest latency", nullptr, static_cast<int>(untested.size())));
             // The callback comes on the runner's worker thread.
-            mw_->testRunner->queueUrlTests(untested, [this, pick] { QMetaObject::invokeMethod(this, pick, Qt::QueuedConnection); });
+            engine_->queueUrlTests(untested, [this, pick] { QMetaObject::invokeMethod(this, pick, Qt::QueuedConnection); });
         }
         if (waiter == nullptr) respond(accepted());
     }
@@ -732,22 +732,22 @@ namespace RemoteApi {
             respond(error);
             return;
         }
-        switch (mw_->connection_state()) {
-            case MainWindow::ConnectionState::Idle:
+        switch (engine_->connectionState()) {
+            case Engine::ConnectionState::Idle:
                 respond(Response::Ok(statusJson()));
                 return;
-            case MainWindow::ConnectionState::Connecting:
-            case MainWindow::ConnectionState::Stopping:
+            case Engine::ConnectionState::Connecting:
+            case Engine::ConnectionState::Stopping:
                 respond(RouterImpl::busyConnection());
                 return;
-            case MainWindow::ConnectionState::Running:
+            case Engine::ConnectionState::Running:
                 break;
         }
         if (options.wait) {
             const auto waiter = makeWaiter(respond, options.timeoutMs, [this] { return accepted(); });
             stops_.append([this, waiter] { answer(waiter, Response::Ok(statusJson())); });
         }
-        mw_->profile_stop(false, false, true, false);
+        engine_->stop(Engine::StopOptions{.manual = true, .interactive = false});
         if (!options.wait) respond(accepted());
     }
 
@@ -788,11 +788,11 @@ namespace RemoteApi {
         applyWithRestart(options, respond, [&](quint64 serial) {
             bool restarted = false;
             if (proxyChanges) {
-                restarted = mw_->set_spmode_system_proxy(
-                    *systemProxy, MainWindow::ModeChange{.interactive = false, .restart = !tunChanges, .restartSerial = serial});
+                restarted = engine_->setSystemProxy(
+                    *systemProxy, Engine::ModeChange{.interactive = false, .restart = !tunChanges, .restartSerial = serial});
             }
             if (tunChanges) {
-                restarted = mw_->set_spmode_vpn(*tun, MainWindow::ModeChange{.interactive = false, .restartSerial = serial}) || restarted;
+                restarted = engine_->setTun(*tun, Engine::ModeChange{.interactive = false, .restartSerial = serial}) || restarted;
             }
             return restarted;
         });
@@ -832,15 +832,11 @@ namespace RemoteApi {
             respond(RouterImpl::busyConnection());
             return;
         }
-        applyWithRestart(options, respond, [&](quint64 serial) { return mw_->choose_route(*routeId, false, serial); });
+        applyWithRestart(options, respond, [&](quint64 serial) { return engine_->chooseRoute(*routeId, false, serial); });
     }
 
     void Router::getLiveStats(const Request &, const Responder &respond, int) {
-        MainWindow::LiveRates rates;
-        if (mw_->runningSnapshot() != nullptr && !Configs::dataManager->settingsRepo->disable_traffic_stats && mw_->m_liveRatesAt.isValid() &&
-            !mw_->m_liveRatesAt.hasExpired(RouterImpl::kLiveRatesFreshMs)) {
-            rates = mw_->m_liveRates;
-        }
+        const auto rates = engine_->freshLiveRates(RouterImpl::kLiveRatesFreshMs).value_or(Engine::LiveRates{});
         respond(Response::Ok(QJsonObject{
             {"proxy", QJsonObject{{"up", rates.proxyUp}, {"down", rates.proxyDown}}},
             {"direct", QJsonObject{{"up", rates.directUp}, {"down", rates.directDown}}},

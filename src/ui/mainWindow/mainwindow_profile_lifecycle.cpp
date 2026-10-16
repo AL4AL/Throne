@@ -7,12 +7,9 @@
 #include "include/stats/autoselector/AutoSelectorMonitor.hpp"
 #include "include/configs/AutoSelectorPlan.h"
 #include "include/api/RPC.h"
-#include "include/ui/utils/RestartPrompt.h"
-#include "include/ui/stats/dialog_endpoint_details.h"
+#include "include/engine/vpn/VpnEndpoints.h"
 #include "include/ui/widget/LiveChart.h"
 
-#include <QPushButton>
-#include <QMessageBox>
 #include <QJsonDocument>
 #include <QFile>
 #include <QRegularExpression>
@@ -26,7 +23,6 @@
 #include "include/global/OtpPlaceholder.hpp"
 #include "include/global/RunningProfiles.hpp"
 #include "include/global/VpnCredentialOverride.hpp"
-#include "include/ui/profile/dialog_vpn_auth.h"
 
 #include "include/sys/KillSwitch.hpp"
 #include "include/sys/Process.hpp"
@@ -103,23 +99,12 @@ bool MainWindow::handleXrayGeoAssetError(const QString& error, const QString& co
                     ? tr("a required category")
                     : QStringLiteral("%1:%2").arg(ruleType, category);
 
-                MessageBoxWarning(
-                    tr("Geo asset missing category"),
-                    tr("The Xray config \"%1\" needs \"%2\", but the installed %3 does "
-                       "not contain it.\n\n"
-                       "Re-downloading from the same source will not fix this — the data "
-                       "file does not include that category. Set the GeoIP/GeoSite asset "
-                       "URL in Settings to a source that provides \"%2\", then delete %3 "
-                       "from the app folder and download it again.")
-                        .arg(contextName, needed, whichFile));
+                policy()->geoAssetMissingCategory(contextName, needed, whichFile);
                 m_xrayGeoAssetBusy = false;
                 return;
             }
 
-            if (QMessageBox::question(this, tr("Geo asset files required"),
-                    tr("The Xray config \"%1\" uses geoip/geosite routing rules, but the "
-                       "required data files (geoip.dat / geosite.dat) are not installed.\n\n"
-                       "Download them now?").arg(contextName)) != QMessageBox::Yes) {
+            if (!policy()->confirmGeoAssetDownload(contextName)) {
                 m_xrayGeoAssetBusy = false;
                 return;
             }
@@ -136,14 +121,8 @@ bool MainWindow::handleXrayGeoAssetError(const QString& error, const QString& co
                 }
                 runOnUiThread([=, this] {
                     m_xrayGeoAssetBusy = false;
-                    if (!dlErr.isEmpty()) {
-                        MessageBoxWarning(tr("Geo asset download failed"), dlErr);
-                    } else {
-                        MW_show_log(tr("Downloaded Xray geo asset files."));
-                        QMessageBox::information(this, tr("Geo assets installed"),
-                            tr("Geo data files were downloaded successfully.\n\n"
-                               "Please try again."));
-                    }
+                    if (dlErr.isEmpty()) MW_show_log(tr("Downloaded Xray geo asset files."));
+                    policy()->geoAssetDownloadFinished(dlErr);
                 });
             });
         }, this, 300);
@@ -212,7 +191,7 @@ void MainWindow::profile_start(const StartRequest &request) {
     if (!killSwitch->allowsStart()) {
         MW_show_log(tr("[Kill switch] Not starting %1: the kill switch is not active.").arg(ent->outbound->DisplayTypeAndName()));
         emit start_finished(request.serial, ent->id, StartOutcome::KillSwitchInactive, killSwitch->failureText());
-        if (request.interactive) show_kill_switch_problem();
+        if (request.interactive) policy()->killSwitchProblem();
         return;
     }
     if (guard_core_restart_pending() ||
@@ -247,7 +226,7 @@ void MainWindow::profile_start(const StartRequest &request) {
         if (!resolved.interactive && !error.isEmpty()) MW_show_log(error);
         runOnUiThread([=, this] { emit start_finished(resolved.serial, resolved.profileId, outcome, error); });
     };
-    auto profile_start_stage2 = [=, this](const QPointer<RestartPrompt> &restartPrompt) {
+    auto profile_start_stage2 = [=, this](const Engine::SlowOperation &slowStart) {
         libcore::LoadConfigReq req;
         req.core_config = QJsonObject2QString(result->coreConfig, true).toStdString();
         req.tun_ipv4_cidr = result->tunIPv4CIDR.toStdString();
@@ -268,16 +247,15 @@ void MainWindow::profile_start(const StartRequest &request) {
         if (!result->extraCoreData->path.isEmpty())
         {
             if (!Sys::KillSwitch::instance()->permitExtraCore(result->extraCoreData->path)) {
-                runOnUiThread([restartPrompt] { if (restartPrompt) restartPrompt->dismiss(); });
+                runOnUiThread([slowStart] { slowStart.dismiss(); });
                 MW_show_log(tr("[Kill switch] The extra core %1 could not be allowed through the kill switch.").arg(result->extraCoreData->path));
                 finish(StartOutcome::ExtraCoreBlocked, {});
                 if (!resolved.interactive) return false;
                 runOnUiThread([this] {
                     if (Sys::KillSwitch::instance()->state() == Sys::KillSwitch::State::Failed) {
-                        show_kill_switch_problem();
+                        policy()->killSwitchProblem();
                     } else {
-                        ShowPassiveWarning(tr("Kill switch"),
-                                           tr("The kill switch could not be updated to allow this profile's extra core, so the profile was not started. See the log for details."));
+                        policy()->extraCoreNotPermitted();
                     }
                 });
                 return false;
@@ -291,7 +269,7 @@ void MainWindow::profile_start(const StartRequest &request) {
         bool rpcOK;
         const QString error = defaultClient->Start(&rpcOK, req);
         // Queued ahead of every dialog below, so none of them can be shown over the prompt.
-        runOnUiThread([restartPrompt] { if (restartPrompt) restartPrompt->dismiss(); });
+        runOnUiThread([slowStart] { slowStart.dismiss(); });
         if (!rpcOK) {
             finish(StartOutcome::CoreUnavailable, {});
             return false;
@@ -304,42 +282,21 @@ void MainWindow::profile_start(const StartRequest &request) {
             if (error.contains("Fwpm", Qt::CaseInsensitive)) {
                 finish(StartOutcome::StrictRouteUnavailable, error);
                 if (!resolved.interactive) return false;
-                runOnUiThread([=, this] {
-                    MessageBoxWarning(
-                        tr("Strict routing unavailable"),
-                        tr("Windows could not enable strict routing. Open Tun Settings, "
-                           "disable Strict Route, and start the profile again.\n\n"
-                           "Disabling Strict Route may cause DNS leaks.\n\nError: %1").arg(error));
-                });
+                runOnUiThread([=, this] { policy()->strictRouteUnavailable(error); });
                 return false;
             }
             if (error.contains("configure tun interface")) {
                 finish(StartOutcome::TunFailed, error);
                 if (!resolved.interactive) return false;
                 runOnUiThread([=, this] {
-
-                    QMessageBox msg(
-                        QMessageBox::Information,
-                        tr("Tun device misbehaving"),
-                        tr("If you have trouble starting VPN, you can force reset Core process here and then try starting the profile again. The error is %1").arg(error),
-                        QMessageBox::NoButton,
-                        this
-                    );
-                    auto reset = msg.addButton(tr("Reset"), QMessageBox::ActionRole);
-                    auto cancel = msg.addButton(tr("Cancel"), QMessageBox::ActionRole);
-
-                    msg.setDefaultButton(cancel);
-                    msg.setEscapeButton(cancel);
-
-                    msg.exec();
-                    if (msg.clickedButton() == reset) {
-                        RestartCore();
-                    }
+                    if (policy()->offerCoreReset(error)) RestartCore();
                 });
                 return false;
             }
             finish(StartOutcome::StartFailed, error);
-            if (resolved.interactive) runOnUiThread([=, this] { MessageBoxWarning("LoadConfig return error", error); });
+            if (resolved.interactive) {
+                runOnUiThread([=, this] { policy()->startFailed(resolved, StartOutcome::StartFailed, "LoadConfig return error", error); });
+            }
             return false;
         }
         Stats::trafficLooper->SetChainGroups(result->chainGroups);
@@ -433,9 +390,9 @@ void MainWindow::profile_start(const StartRequest &request) {
         return;
     }
 
-    const QPointer<RestartPrompt> restartPrompt = resolved.interactive
-        ? new RestartPrompt(this, tr("If there is no response for a long time, it is recommended to restart the software."), 10000)
-        : nullptr;
+    const Engine::SlowOperation slowStart = resolved.interactive
+        ? policy()->slowOperation(Engine::SlowOperationKind::Start, 10000)
+        : Engine::SlowOperation{};
 
     runOnUiThread([this] {
         m_profileConnecting = true;
@@ -452,14 +409,14 @@ void MainWindow::profile_start(const StartRequest &request) {
             m_switchingProfile = false;
         }
         MW_show_log(">>>>>>>> " + tr("Starting profile %1").arg(ent->outbound->DisplayTypeAndName()));
-        const bool started = profile_start_stage2(restartPrompt);
+        const bool started = profile_start_stage2(slowStart);
         const auto markerAt = MonotonicMs();
         if (!started) {
             MW_show_log("<<<<<<<< " + tr("Failed to start profile %1").arg(ent->outbound->DisplayTypeAndName()));
         }
         mu_starting.unlock();
         runOnUiThread([=, this] {
-            if (restartPrompt) restartPrompt->dismiss();
+            slowStart.dismiss();
             m_profileConnecting = false;
             refresh_startstop_button();
             if (trafficChart == nullptr) return;
@@ -480,7 +437,7 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interact
     }
     const auto id = current->id;
 
-    auto profile_stop_stage2 = [=,this](const QPointer<RestartPrompt> &restartPrompt) {
+    auto profile_stop_stage2 = [=,this](const Engine::SlowOperation &slowStop) {
         if (testRunner->isTestingCurrent()) {
             bool ok;
             defaultClient->StopTests(&ok);
@@ -489,10 +446,10 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interact
         if (!crash) {
             bool rpcOK;
             const QString error = defaultClient->Stop(&rpcOK);
-            runOnUiThread([restartPrompt] { if (restartPrompt) restartPrompt->dismiss(); });
+            runOnUiThread([slowStop] { slowStop.dismiss(); });
             if (rpcOK && !error.isEmpty()) {
                 if (interactive) {
-                    runOnUiThread([=,this] { MessageBoxWarning(tr("Stop return error"), error); });
+                    runOnUiThread([=,this] { policy()->stopFailed(error); });
                 } else {
                     MW_show_log(tr("Stop return error") + ": " + error);
                 }
@@ -530,10 +487,10 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interact
         Stats::trafficStatsManager->Flush();
 
         // runOnUiThread is a no-op before qApp exists, so the teardown must not chase this.
-        QPointer<RestartPrompt> restartPrompt;
+        Engine::SlowOperation slowStop;
         if (interactive) {
-            runOnUiThread([this, &restartPrompt] {
-                restartPrompt = new RestartPrompt(this, tr("If there is no response for a long time, it is recommended to restart the software."), 5000);
+            runOnUiThread([this, &slowStop] {
+                slowStop = policy()->slowOperation(Engine::SlowOperationKind::Stop, 5000);
             }, true);
         }
 
@@ -542,7 +499,7 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interact
         if (stopping != nullptr) {
             MW_show_log(">>>>>>>> " + tr("Stopping profile %1").arg(stopping->outbound->DisplayTypeAndName()));
         }
-        if (!profile_stop_stage2(restartPrompt)) {
+        if (!profile_stop_stage2(slowStop)) {
             MW_show_log("<<<<<<<< " + tr("Failed to stop, please restart the program."));
         }
 
@@ -553,8 +510,8 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interact
         setRunning(nullptr);
         const auto stoppedAt = MonotonicMs();
 
-        runOnUiThread([=, this, &restartPrompt] {
-            if (restartPrompt) restartPrompt->dismiss();
+        runOnUiThread([=, this, &slowStop] {
+            slowStop.dismiss();
             if (trafficChart != nullptr && !m_switchingProfile) trafficChart->addMarker(stoppedAt, LiveChart::Marker::Stopped, {});
 
             m_profileDisconnecting = false;
@@ -576,7 +533,7 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interact
 void MainWindow::fail_start(const StartRequest &request, StartOutcome outcome, const QString &title, const QString &error) {
     emit start_finished(request.serial, request.profileId, outcome, error);
     if (request.interactive) {
-        MessageBoxWarning(title, error);
+        policy()->startFailed(request, outcome, title, error);
     } else {
         MW_show_log(title + ": " + error);
     }
@@ -641,7 +598,7 @@ void MainWindow::stop_vpn_challenge_poll() {
     reset_vpn_endpoint_tracking();
     Stats::SetVpnEndpointProfiles({});
     Configs::ClearRunningProfiles();
-    if (m_vpnAuthDialog != nullptr) m_vpnAuthDialog->close();
+    policy()->vpnChallengesCleared();
 }
 
 // Per-run only: the auto-restart budget must not be cleared here, the restart it counts comes through.
@@ -967,24 +924,20 @@ bool MainWindow::auto_restart_for_vpn_auth(const QString &endpointTag, int profi
 
 void MainWindow::show_vpn_challenge(const VpnAuthChallenge &challenge) {
     if (challenge.id.isEmpty()) return;
-    if (m_vpnAuthDialog != nullptr) return;
+    if (policy()->vpnPromptOpen()) return;
 
     const auto key = challenge.endpointTag + QChar(0x1F) + challenge.id;
     if (m_vpnChallengeSeen.contains(key)) return;
     m_vpnChallengeSeen.insert(key);
 
-    auto *dialog = new DialogVpnAuth(this, challenge);
-    dialog->setAttribute(Qt::WA_DeleteOnClose);
-    m_vpnAuthDialog = dialog;
-    dialog->show();
-    ActivateWindow(dialog);
+    policy()->vpnChallenge(challenge);
 }
 
 void MainWindow::show_vpn_auth_failure(const QString &endpointTag, const QString &error) {
     constexpr int maxPrompts = 3;
 
     const auto running = runningSnapshot();
-    if (m_vpnAuthDialog != nullptr || running == nullptr) return;
+    if (policy()->vpnPromptOpen() || running == nullptr) return;
     const int profileID = Stats::VpnEndpointProfileID(endpointTag);
     if (profileID < 0) return;
 
@@ -1018,17 +971,12 @@ void MainWindow::show_vpn_auth_failure(const QString &endpointTag, const QString
     MW_show_log(tr("[VPN] %1 rejected the saved credentials.").arg(Stats::VpnEndpointDisplayName(endpointTag)));
 
     const int runningID = running->id;
-    auto *dialog = new DialogVpnAuth(this, challenge, true);
-    dialog->setAttribute(Qt::WA_DeleteOnClose);
-    m_vpnAuthDialog = dialog;
-    connect(dialog, &QDialog::accepted, this, [=, this] {
+    policy()->vpnCredentialsRejected(profileID, challenge, [=, this](const QString &username, const QString &password) {
         if (const auto current = runningSnapshot(); current == nullptr || current->id != runningID) return;
-        Configs::SetVpnCredentialOverride(profileID, {dialog->enteredUsername(), dialog->enteredPassword()});
+        Configs::SetVpnCredentialOverride(profileID, {username, password});
         m_vpnAuthRestartID = runningID;
         profile_start(runningID);
     });
-    dialog->show();
-    ActivateWindow(dialog);
 }
 
 void MainWindow::clear_vpn_credential_overrides() {

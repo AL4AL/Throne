@@ -149,6 +149,9 @@ set(PROJECT_SOURCES
         include/api/remote/Server.hpp
         src/api/remote/Server.cpp
         src/api/remote/Config.cpp
+        include/api/remote/Router.hpp
+        src/api/remote/Router.cpp
+        src/api/remote/RouterTests.cpp
 
         src/stats/traffic/TrafficLooper.cpp
         include/stats/traffic/TrafficLine.hpp
@@ -211,9 +214,9 @@ set(PROJECT_SOURCES
         src/ui/mainWindow/mainwindow_autoselector.cpp
         src/ui/mainWindow/mainwindow_scanner.cpp
         src/ui/mainWindow/TestRunner.cpp
-        include/api/remote/Router.hpp
-        src/api/remote/Router.cpp
-        src/api/remote/RouterTests.cpp
+        include/ui/mainWindow/MainWindowEngineControl.h
+        src/ui/mainWindow/mainwindow_engine_control.cpp
+        src/ui/mainWindow/mainwindow_policy.cpp
         include/ui/mainWindow/MainWindowInternal.h
         include/ui/mainWindow/TestRunner.h
         include/ui/mainwindow.h
@@ -668,6 +671,9 @@ endif ()
 
 # Appended last so engine TUs form trailing MSVC unity batches: adding one never regroups the batches above.
 set(ENGINE_SOURCES
+        include/engine/EngineTypes.h
+        include/engine/EngineControl.h
+        include/engine/EnginePolicy.h
         include/engine/EngineTr.h
         include/engine/ThreadCheck.h
         include/engine/Lifecycle.h
@@ -680,6 +686,11 @@ set(ENGINE_SOURCES
         src/engine/app/DataDirLock.cpp
         include/engine/app/ConfigDump.h
         src/engine/app/ConfigDump.cpp
+        include/engine/vpn/VpnAuth.h
+        include/engine/vpn/VpnEndpoints.h
+        src/engine/vpn/VpnEndpoints.cpp
+        include/engine/headless/HeadlessPolicy.h
+        src/engine/headless/HeadlessPolicy.cpp
 )
 list(APPEND PROJECT_SOURCES ${ENGINE_SOURCES})
 

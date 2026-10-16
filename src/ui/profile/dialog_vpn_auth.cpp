@@ -1,6 +1,6 @@
 #include "include/ui/profile/dialog_vpn_auth.h"
 
-#include "include/ui/stats/dialog_endpoint_details.h"
+#include "include/engine/vpn/VpnEndpoints.h"
 
 #include <QColor>
 #include <QComboBox>

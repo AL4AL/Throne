@@ -329,7 +329,7 @@ bool TestRunner::runLatencyGroup(LatencyKind kind, const QList<int>& requestedID
             ? MainWindow::tr("The last url test did not exit completely, please wait. If it persists, please restart the program.")
             : MainWindow::tr("The last test did not exit completely, please wait. If it persists, please restart the program.");
         // Auto-selector ranking calls in from a worker thread, where no widget may be created.
-        if (interactive && QThread::currentThread() == mw_->thread()) MessageBoxWarning(software_name, text);
+        if (interactive && QThread::currentThread() == mw_->thread()) mw_->policy()->testSessionBusy(text);
         else MW_show_log(text);
         finish();
         return false;
@@ -431,7 +431,7 @@ bool TestRunner::runSpeedTests(const QList<int>& requestedIDs, bool testCurrent,
     }
     if (!session_.tryLock()) {
         const auto text = MainWindow::tr("The last test did not finish completely, please wait. If it persists, please restart the program.");
-        if (interactive) MessageBoxWarning(software_name, text);
+        if (interactive) mw_->policy()->testSessionBusy(text);
         else MW_show_log(text);
         finish();
         return false;

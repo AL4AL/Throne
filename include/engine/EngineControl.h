@@ -1,0 +1,71 @@
+#pragma once
+
+#include <functional>
+#include <memory>
+#include <optional>
+
+#include <QList>
+#include <QObject>
+#include <QString>
+
+#include "include/engine/EngineTypes.h"
+
+namespace Configs {
+    class Profile;
+}
+
+namespace Engine {
+    // What the Throne API drives; MainWindow implements it until the engine owns the lifecycle. Main thread only unless noted.
+    class EngineControl : public QObject {
+        Q_OBJECT
+
+    public:
+        using QObject::QObject;
+
+        virtual ConnectionState connectionState() const = 0;
+
+        // Safe from any thread.
+        virtual std::shared_ptr<Configs::Profile> runningSnapshot() const = 0;
+
+        virtual int resolveLastProfile() = 0;
+
+        virtual quint64 nextStartSerial() = 0;
+
+        // startFinished fires for every request, deferred and superseded ones included.
+        virtual void start(const StartRequest &request) = 0;
+
+        virtual void stop(const StopOptions &options) = 0;
+
+        // Each returns whether it restarted the running profile.
+        virtual bool setSystemProxy(bool enable, const ModeChange &change) = 0;
+
+        virtual bool setTun(bool enable, const ModeChange &change) = 0;
+
+        virtual bool chooseRoute(int routeId, bool interactive, quint64 serial) = 0;
+
+        virtual int clearTestResults(const QList<int> &profileIds) = 0;
+
+        // Empty when nothing runs, stats are off, or the last sample is older than maxAgeMs.
+        virtual std::optional<LiveRates> freshLiveRates(qint64 maxAgeMs) const = 0;
+
+        virtual bool testsRunning() = 0;
+
+        // Safe from any thread.
+        virtual bool testsStopRequested() const = 0;
+
+        // Unattended: a refusal is reported by the false return, never a dialog. onFinished may run on a test thread.
+        virtual bool runTests(TestKind kind, const QList<int> &profileIds, const std::function<void()> &onFinished) = 0;
+
+        virtual void queueUrlTests(const QList<int> &profileIds, const std::function<void()> &onFinished) = 0;
+
+        // Blocks until the session winds down; never call it on the main thread.
+        virtual void stopTests() = 0;
+
+    signals:
+        void startFinished(quint64 serial, int profileId, Engine::StartOutcome outcome, const QString &error);
+
+        void stopFinished(int profileId);
+
+        void connectionStateChanged(Engine::ConnectionState state);
+    };
+} // namespace Engine

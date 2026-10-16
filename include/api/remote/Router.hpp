@@ -12,7 +12,6 @@
 
 #include "include/api/remote/Message.hpp"
 
-class MainWindow;
 class QRegularExpression;
 class QTimer;
 
@@ -22,13 +21,17 @@ namespace Configs {
     class RouteProfile;
 }
 
+namespace Engine {
+    class EngineControl;
+}
+
 namespace RemoteApi {
     // The endpoints of spec/api.md in throneproj/Throne-api. UI thread only.
     class Router : public QObject {
         Q_OBJECT
 
     public:
-        explicit Router(MainWindow *mw);
+        Router(Engine::EngineControl *engine, QObject *parent);
 
         void dispatch(const Request &request, const Responder &respond);
 
@@ -120,7 +123,7 @@ namespace RemoteApi {
         void finishJob(int jobId, bool stopped);
         std::shared_ptr<Job> findJob(int jobId) const;
 
-        MainWindow *mw_;
+        Engine::EngineControl *engine_;
         // Keyed by StartRequest serial; called once, with no failure when the profile started.
         QHash<quint64, std::function<void(const std::optional<Response> &failure)>> starts_;
         QList<std::function<void()>> stops_;

@@ -9,8 +9,6 @@ file(TO_CMAKE_PATH "${ROOT}" ROOT)
 
 # E5 ratchet: files outside the UI that still include include/ui/. Entries only ever leave this list.
 set(UI_INCLUDE_ALLOWLIST
-        src/api/remote/Router.cpp                       # Phase 1
-        src/api/remote/RouterTests.cpp                  # Phase 1
         src/global/HTTPRequestHelper.cpp                # Phase 3
         src/stats/connectionLister/connectionLister.cpp # Phase 3
         src/stats/traffic/TrafficLooper.cpp             # Phase 3

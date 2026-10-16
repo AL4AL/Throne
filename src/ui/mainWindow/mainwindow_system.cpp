@@ -39,12 +39,6 @@
 #include "3rdparty/WinCommander.hpp"
 #include "include/sys/windows/WinVersion.h"
 #endif
-#ifdef Q_OS_LINUX
-#include "include/sys/linux/LinuxCap.h"
-#endif
-#ifdef Q_OS_MACOS
-#include "include/sys/macos/MacOS.h"
-#endif
 
 qint64 MainWindow::GetCorePid() {
     QMutexLocker lock(&coreProcessMutex);
@@ -238,64 +232,7 @@ bool MainWindow::get_elevated_permissions(bool interactive) {
     }
     if (Configs::IsAdmin()) return true;
     if (!interactive) return false;
-#ifdef NKR_ELEVATION_HINT
-    MessageBoxWarning(software_name, tr("This installation cannot grant the core privileges by itself.") + "\n\n" + NKR_ELEVATION_HINT);
-    return false;
-#endif
-#ifdef Q_OS_LINUX
-    if (!Linux_HavePkexec()) {
-        MessageBoxWarning(software_name, "Please install \"pkexec\" first.");
-        return false;
-    }
-    auto n = QMessageBox::warning(GetMessageBoxParent(), software_name, tr("Please give the core root privileges"), QMessageBox::Yes | QMessageBox::No);
-    if (n == QMessageBox::Yes) {
-        runOnNewThread([=,this]
-        {
-            auto chownArgs = QString("root:root " + Configs::FindCoreRealPath());
-            auto ret = Linux_Run_Command("chown", chownArgs);
-            if (ret != 0) {
-                MW_show_log(QString("Failed to run chown %1 code is %2").arg(chownArgs).arg(ret));
-            }
-            auto chmodArgs = QString("u+s " + Configs::FindCoreRealPath());
-            ret = Linux_Run_Command("chmod", chmodArgs);
-            if (ret == 0) {
-                StopVPNProcess();
-            } else {
-                MW_show_log(QString("Failed to run chmod %1").arg(chmodArgs));
-            }
-        });
-        return false;
-    }
-#endif
-#ifdef Q_OS_WIN
-    auto n = QMessageBox::warning(GetMessageBoxParent(), software_name, tr("Please run Throne as admin"), QMessageBox::Yes | QMessageBox::No);
-    if (n == QMessageBox::Yes) {
-        this->exit_reason = ExitReason::RestartWithTun;
-        on_menu_exit_triggered();
-    }
-#endif
-
-#ifdef Q_OS_MACOS
-    if (Configs::isSetuidSet(Configs::FindCoreRealPath().toStdString()))
-    {
-        StopVPNProcess();
-        return true;
-    }
-    auto n = QMessageBox::warning(GetMessageBoxParent(), software_name, tr("Please give the core root privileges"), QMessageBox::Yes | QMessageBox::No);
-    if (n == QMessageBox::Yes)
-    {
-        auto Command = QString("sudo chown root:wheel '%1' && sudo chmod u+s '%1'").arg(Configs::FindCoreRealPath());
-        auto ret = Mac_Run_Command(Command);
-        if (ret == 0) {
-            MessageBoxInfo(tr("Requesting permission"), tr("Please Enter your password in the opened terminal, then try again"));
-            return false;
-        } else {
-            MW_show_log(QString("Failed to run %1 with %2").arg(Command).arg(ret));
-            return false;
-        }
-    }
-#endif
-    return false;
+    return policy()->requestCorePrivileges();
 }
 
 namespace {
@@ -337,7 +274,7 @@ bool MainWindow::set_spmode_system_proxy(bool enable, const ModeChange &change) 
     if (enable && settings->disable_mixed_inbound) {
         if (change.interactive) {
             runOnUiThread([=, this] {
-               MessageBoxWarning("Invalid Operation", "Cannot set system proxy when mixed inbound is disabled.");
+               policy()->systemProxyNeedsMixedInbound();
             });
         }
         ui->checkBox_SystemProxy->setChecked(false);
@@ -428,66 +365,11 @@ void MainWindow::kill_switch_state_changed() {
     m_killSwitchWasArmed = armed;
 
     refresh_status();
-    if (!failed && m_killSwitchDialog) m_killSwitchDialog->close();
-    if (enteredFailed) show_kill_switch_problem();
+    if (!failed) policy()->killSwitchProblemResolved();
+    if (enteredFailed) policy()->killSwitchProblem();
     if (enteredArmed && !guard_core_restart_pending() && core_lacks_guard_identity()) {
         restart_core_for_guard(StartRequest{Configs::dataManager->settingsRepo->started_id});
     }
-}
-
-void MainWindow::show_kill_switch_problem() {
-    auto *killSwitch = Sys::KillSwitch::instance();
-    if (killSwitch->state() != Sys::KillSwitch::State::Failed) return;
-    const bool privilege = killSwitch->failedForPrivileges();
-    if (m_killSwitchDialog) {
-        if (m_killSwitchDialog->property("privilege").toBool() == privilege) {
-            m_killSwitchDialog->setText(killSwitch->failureText());
-            return;
-        }
-        m_killSwitchDialog->close();
-    }
-
-    auto *box = new QMessageBox(QMessageBox::Warning, tr("Kill switch is not active"), killSwitch->failureText(),
-                                QMessageBox::NoButton, this);
-    box->setTextFormat(Qt::PlainText);
-    box->setAttribute(Qt::WA_DeleteOnClose);
-    box->setProperty("privilege", privilege);
-#ifdef Q_OS_WIN
-    auto *fix = box->addButton(privilege ? tr("Restart as Administrator") : tr("Retry"), QMessageBox::AcceptRole);
-#else
-    auto *fix = box->addButton(privilege ? tr("Grant Privileges") : tr("Retry"), QMessageBox::AcceptRole);
-#endif
-    auto *disable = box->addButton(tr("Disable Kill Switch"), QMessageBox::DestructiveRole);
-    auto *cancel = box->addButton(QMessageBox::Cancel);
-    box->setDefaultButton(fix);
-    box->setEscapeButton(cancel);
-    m_killSwitchDialog = box;
-
-    // Custom-button result codes changed in Qt 6.5, so only the clicked button pointer is trusted.
-    connect(box, &QMessageBox::finished, this, [this, box, fix, disable, privilege] {
-        const auto *clicked = box->clickedButton();
-        if (m_killSwitchDialog == box) m_killSwitchDialog = nullptr;
-        if (clicked == disable) {
-            disable_kill_switch();
-            return;
-        }
-        if (clicked != fix) return;
-        if (!privilege) {
-            Sys::KillSwitch::instance()->apply();
-            return;
-        }
-#ifdef Q_OS_WIN
-        // Queued: ShellExecuteEx's UAC pump runs this box's deleteLater, so exiting from here frees it under QMessageBox (#1961).
-        QMetaObject::invokeMethod(this, [this] {
-            exit_reason = ExitReason::RestartElevated;
-            on_menu_exit_triggered();
-        }, Qt::QueuedConnection);
-#else
-        // Otherwise the core restarts once it is privileged, and CoreStarted retries.
-        if (get_elevated_permissions()) Sys::KillSwitch::instance()->apply();
-#endif
-    });
-    box->open();
 }
 
 void MainWindow::show_startstop_menu() {
