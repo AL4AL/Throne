@@ -33,7 +33,7 @@
 
 #include "include/database/GroupsRepo.h"
 #include "include/database/ProfilesRepo.h"
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 #include "include/global/RunningProfiles.hpp"
 #include "include/global/Utils.hpp"
 #include "include/ui/utils/ValidationForm.h"

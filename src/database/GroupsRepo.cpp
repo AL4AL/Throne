@@ -7,8 +7,8 @@
 #include <QSet>
 
 #include "include/database/ProfilesRepo.h"
+#include "include/engine/EngineEvents.h"
 #include "include/global/Configs.hpp"
-#include "include/ui/mainwindow.h"
 
 
 namespace Configs {
@@ -407,16 +407,16 @@ namespace Configs {
                     }
                     batch.swap(pendingSorts);
                 }
-                QStringList moved;
+                QList<int> moved;
                 for (auto it = batch.cbegin(); it != batch.cend(); ++it) {
                     const auto group = dataManager->groupsRepo->GetGroup(it.key());
                     if (group == nullptr) continue;
                     const bool reordered = it->full ? group->Resort() : group->Reposition(it->changed.values());
                     if (!reordered) continue;
                     dataManager->groupsRepo->Save(group);
-                    moved << Int2String(it.key());
+                    moved << it.key();
                 }
-                if (!moved.isEmpty() && MW_dialog_message) MW_dialog_message(MwMessage::GroupOrderChanged, moved);
+                if (!moved.isEmpty()) Engine::EngineEvents::GroupOrderChanged(moved);
             }
         }
 

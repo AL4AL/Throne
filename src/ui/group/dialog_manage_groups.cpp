@@ -1,7 +1,7 @@
 #include "include/ui/group/dialog_manage_groups.h"
 
 #include "include/configs/sub/GroupUpdater.hpp"
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 #include "include/ui/group/GroupItem.h"
 #include "include/ui/group/dialog_edit_group.h"
 

@@ -16,6 +16,7 @@
 #include "include/api/RPC.h"
 #include "include/api/remote/Server.hpp"
 #include "include/configs/generate.h"
+#include "include/engine/ThreadCheck.h"
 #include "include/global/Configs.hpp"
 #include "include/global/HTTPRequestHelper.hpp"
 #include "include/global/LocalNetwork.hpp"
@@ -51,7 +52,7 @@ qint64 MainWindow::GetCorePid() {
 }
 
 QString MainWindow::GetRunningConfigName() {
-    auto ent = running;
+    auto ent = runningSnapshot();
     if (ent == nullptr || ent->outbound == nullptr) return {};
     return ent->outbound->DisplayTypeAndName();
 }
@@ -122,6 +123,8 @@ void MainWindow::on_commitDataRequest() {
 
 void MainWindow::prepare_exit()
 {
+    // Re-entry from a nested loop of the running teardown: mu_exit is not recursive, and the flag is set before any such loop.
+    if (Configs::dataManager->settingsRepo->prepare_exit) return;
     qDebug() << "prepare for exit...";
     mu_exit.lock();
     if (Configs::dataManager->settingsRepo->prepare_exit)
@@ -157,8 +160,12 @@ void MainWindow::prepare_exit()
 }
 
 void MainWindow::on_menu_exit_triggered() {
-    const bool restart = exit_reason == ExitReason::Restart || exit_reason == ExitReason::RestartWithTun ||
-                         exit_reason == ExitReason::RestartElevated;
+    // A teardown already running quits on its own; a second request would cut its nested waits short.
+    if (Configs::dataManager->settingsRepo->prepare_exit) return;
+    // A request made during the teardown below may overwrite exit_reason.
+    const auto reason = exit_reason;
+    const bool restart = reason == ExitReason::Restart || reason == ExitReason::RestartWithTun ||
+                         reason == ExitReason::RestartElevated;
     const auto program = QApplication::applicationFilePath();
     QStringList arguments;
     if (restart) {
@@ -168,12 +175,12 @@ void MainWindow::on_menu_exit_triggered() {
             arguments.removeAll("-tray");
             arguments.removeAll("-flag_restart_tun_on");
         }
-        if (exit_reason == ExitReason::RestartWithTun) arguments << "-flag_restart_tun_on";
+        if (reason == ExitReason::RestartWithTun) arguments << "-flag_restart_tun_on";
     }
 
     bool relaunched = false;
 #ifdef Q_OS_WIN
-    if (exit_reason == ExitReason::RestartWithTun || exit_reason == ExitReason::RestartElevated) {
+    if (reason == ExitReason::RestartWithTun || reason == ExitReason::RestartElevated) {
         // Asked before the teardown so a declined UAC prompt leaves this instance running; the new one waits for this pid to exit.
         // The UAC wait pumps messages with the UI still live, so a second exit request must not launch a second instance.
         static bool elevating = false;
@@ -192,7 +199,7 @@ void MainWindow::on_menu_exit_triggered() {
 #endif
 
     prepare_exit();
-    if (exit_reason == ExitReason::RunUpdater) {
+    if (reason == ExitReason::RunUpdater) {
         QDir::setCurrent(QApplication::applicationDirPath());
 #ifdef Q_OS_WIN
         QFile::copy("./updater.exe", "./updater.old");
@@ -202,6 +209,8 @@ void MainWindow::on_menu_exit_triggered() {
 #endif
     } else if (restart && !relaunched) {
         QDir::setCurrent(QApplication::applicationDirPath());
+        // Until this process exits it holds the data dir lock and still answers on the instance socket.
+        arguments << QString("-wait_pid=%1").arg(QCoreApplication::applicationPid());
         QProcess::startDetached(program, arguments);
     }
     QCoreApplication::quit();
@@ -323,6 +332,7 @@ void MainWindow::set_spmode_system_proxy(bool enable, bool save) {
 }
 
 bool MainWindow::set_spmode_system_proxy(bool enable, const ModeChange &change) {
+    ENGINE_CHECK_MAIN_THREAD();
     const auto &settings = Configs::dataManager->settingsRepo;
     if (enable && settings->disable_mixed_inbound) {
         if (change.interactive) {
@@ -335,7 +345,7 @@ bool MainWindow::set_spmode_system_proxy(bool enable, const ModeChange &change) 
     }
     settings->spmode_system_proxy = enable;
     bool restarted = false;
-    if (running) {
+    if (const auto running = runningSnapshot()) {
         set_system_proxy(enable);
         if (!enable && settings->reset_proxy_on_disable_sp && change.restart) {
             profile_start(StartRequest{running->id, change.interactive, change.restartSerial});
@@ -357,6 +367,7 @@ void MainWindow::set_spmode_vpn(bool enable, bool save) {
 }
 
 bool MainWindow::set_spmode_vpn(bool enable, const ModeChange &change) {
+    ENGINE_CHECK_MAIN_THREAD();
     const auto &settings = Configs::dataManager->settingsRepo;
     if (enable == settings->spmode_vpn) return false;
 
@@ -380,6 +391,7 @@ bool MainWindow::set_spmode_vpn(bool enable, const ModeChange &change) {
 }
 
 bool MainWindow::choose_route(int routeId, bool interactive, quint64 restartSerial) {
+    ENGINE_CHECK_MAIN_THREAD();
     const auto &settings = Configs::dataManager->settingsRepo;
     if (settings->current_route_id == routeId) return false;
     settings->current_route_id = routeId;

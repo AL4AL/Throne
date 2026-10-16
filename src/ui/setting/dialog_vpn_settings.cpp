@@ -1,9 +1,9 @@
 #include "include/ui/setting/dialog_vpn_settings.h"
 
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 #include "include/global/Configs.hpp"
 #include "include/global/Validation.hpp"
-#include "include/ui/mainwindow_interface.h"
+#include "include/ui/mainwindow.h"
 #include "include/ui/utils/ValidationForm.h"
 
 #include <QMessageBox>

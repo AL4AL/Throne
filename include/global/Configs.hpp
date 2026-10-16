@@ -17,6 +17,9 @@ namespace Configs {
 
     bool isSetuidSet(const std::string& path);
 
+    // Set once at startup to the resolved data dir; before that GetBasePath() falls back to the old guess.
+    void SetBasePath(const QString &path);
+
     QString GetBasePath();
 } // namespace Configs
 

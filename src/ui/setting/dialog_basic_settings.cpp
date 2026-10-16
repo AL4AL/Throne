@@ -4,7 +4,7 @@
 #include "include/ui/widget/json/SchemaStore.h"
 #include "include/ui/setting/ThemeManager.hpp"
 #include "include/ui/setting/Icon.hpp"
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 #include "include/global/Configs.hpp"
 #include "include/global/HTTPRequestHelper.hpp"
 #include "include/global/DeviceDetailsHelper.hpp"

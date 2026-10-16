@@ -222,9 +222,7 @@ void MainWindow::show_group_tab_menu(const QPoint &p) {
             const auto id = Configs::dataManager->groupsRepo->GetGroupsTabOrder()[clickedIndex];
             if (QMessageBox::question(this, tr("Confirmation"), tr("Remove %1?").arg(Configs::dataManager->groupsRepo->GetGroup(id)->name)) ==
                 QMessageBox::StandardButton::Yes) {
-                if (running != nullptr) {
-                    if (running->gid == id) profile_stop(false, true, false);
-                }
+                if (const auto running = runningSnapshot(); running != nullptr && running->gid == id) profile_stop(false, true, false);
                 Configs::dataManager->groupsRepo->DeleteGroup(id);
                 MW_dialog_message(MwMessage::GroupsChanged, {});
             }

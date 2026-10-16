@@ -80,6 +80,9 @@ private:
 
     QString contextName(int entID) const;
 
+    // -1 while nothing runs.
+    int runningProfileId() const;
+
     bool staleGen(quint64 gen) const { return sessionGen_.load() != gen; }
 
     void pollSpeedTest(const QMap<QString, int>& tag2entID, bool testCurrent, quint64 gen);

@@ -1,7 +1,7 @@
 #include "include/stats/traffic/TrafficLooper.hpp"
 
 #include "include/api/RPC.h"
-#include "include/ui/mainwindow_interface.h"
+#include "include/ui/mainwindow.h"
 
 #include <QThread>
 #include <QJsonDocument>

@@ -9,6 +9,15 @@ on:
         description: "r for normal release, p for prerelease, leave empty to not publish anything"
         required: false
 jobs:
+  lint:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checking out sources
+        uses: actions/checkout@v7.0.1
+      - name: Checking the engine/UI boundary
+        run: cmake -DROOT=${{ github.workspace }} -P cmake/EngineBoundary.cmake
   build-go:
     permissions:
       contents: read
@@ -167,6 +176,7 @@ jobs:
     permissions:
       contents: read
     needs:
+      - lint
       - build-go
     strategy:
       matrix:

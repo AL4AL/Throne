@@ -6,7 +6,7 @@
 #include "include/database/DatabaseManager.h"
 #include "include/database/IpListsRepo.h"
 #include "include/database/SettingsRepo.h"
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 #include "include/global/Validation.hpp"
 #include "include/ui/utils/ValidationForm.h"
 

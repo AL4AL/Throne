@@ -8,7 +8,7 @@
 #include <QScrollBar>
 #include <QTableWidgetItem>
 
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 #include "include/global/Utils.hpp"
 #include "include/ui/profile/editor_table_utils.h"
 #include "include/ui/utils/ValidationForm.h"

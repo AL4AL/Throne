@@ -33,6 +33,7 @@ void MainWindow::rank_auto_selector(const std::shared_ptr<Configs::Profile>& ent
 void MainWindow::on_subscription_group_changed(int gid, const QList<int>& disturbed) {
     if (gid < 0) return;
     const QSet<int> disturbedSet(disturbed.begin(), disturbed.end());
+    const auto running = runningSnapshot();
     int restartID = -1;
 
     for (int id : Configs::dataManager->profilesRepo->GetProfileIdsByType("autoselector")) {
@@ -66,6 +67,7 @@ void MainWindow::on_subscription_group_changed(int gid, const QList<int>& distur
 
 void MainWindow::on_auto_selector_exhausted(int profileID) {
     auto ent = Configs::dataManager->profilesRepo->GetProfile(profileID);
+    const auto running = runningSnapshot();
     if (ent == nullptr || running == nullptr || running->id != profileID) return;
 
     MW_show_log(tr("[Auto selector] Every running profile stopped working — rebuilding from the "
@@ -75,7 +77,7 @@ void MainWindow::on_auto_selector_exhausted(int profileID) {
         if (auto selector = ent->AutoSelector(); selector != nullptr) stale = selector->lastBuilt;
         rank_auto_selector(ent, stale);
         runOnUiThread([=, this] {
-            if (running == nullptr || running->id != profileID) return;
+            if (const auto current = runningSnapshot(); current == nullptr || current->id != profileID) return;
             profile_start(profileID);
         });
     });

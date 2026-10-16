@@ -1,5 +1,6 @@
 #include "include/database/Database.h"
 #include "include/global/Logger.hpp"
+#include "include/global/Notice.hpp"
 #include <3rdparty/SQLiteCpp/include/Backup.h>
 #include <3rdparty/SQLiteCpp/include/sqlite3.h>
 #include <QDateTime>
@@ -81,8 +82,8 @@ namespace Configs {
             LOG_ERROR(line);
         }
         if (noticeIt) {
-            PostPassiveWarning(QObject::tr("Database error"),
-                               QObject::tr("%1 failed: %2. Details are in the log file.").arg(QString::fromStdString(key), detail));
+            PostNotice({NoticeLevel::Error, QObject::tr("Database error"),
+                        QObject::tr("%1 failed: %2. Details are in the log file.").arg(QString::fromStdString(key), detail)});
         }
     }
 

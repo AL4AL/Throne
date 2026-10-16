@@ -1,13 +1,12 @@
 #include "include/global/Configs.hpp"
 
-#include <QApplication>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QKeySequence>
 #include <QNetworkAccessManager>
 #include <QStandardPaths>
 #include <utility>
@@ -56,7 +55,7 @@ namespace Configs {
         const auto wrapped = QStandardPaths::findExecutable("ThroneCore");
         if (!wrapped.isEmpty()) return wrapped;
 #endif
-        auto fn = QApplication::applicationDirPath() + "/ThroneCore";
+        auto fn = QCoreApplication::applicationDirPath() + "/ThroneCore";
 #ifdef Q_OS_WIN
         fn += ".exe";
 #endif
@@ -110,9 +109,18 @@ namespace Configs {
         return admin;
     }
 
+    namespace {
+        QString basePathOverride;
+    } // namespace
+
+    void SetBasePath(const QString &path) {
+        basePathOverride = path;
+    }
+
     QString GetBasePath() {
+        if (!basePathOverride.isEmpty()) return basePathOverride;
         if (Configs::dataManager->settingsRepo->flag_use_appdata) return QStandardPaths::writableLocation(
               QStandardPaths::AppConfigLocation);
-        return qApp->applicationDirPath();
+        return QCoreApplication::applicationDirPath();
     }
 } // namespace Configs

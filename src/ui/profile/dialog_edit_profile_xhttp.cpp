@@ -1,7 +1,7 @@
 #include "include/ui/profile/dialog_edit_profile.h"
 
 #include "include/configs/common/xrayStreamSetting.h"
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 #include "include/global/Utils.hpp"
 #include "include/ui/utils/ValidationForm.h"
 

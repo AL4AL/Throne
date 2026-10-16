@@ -3,7 +3,7 @@
 #include <QUuid>
 #include <QRegularExpressionValidator>
 #include <limits>
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 #include "include/ui/utils/ValidationForm.h"
 
 EditAnyTLS::EditAnyTLS(QWidget *parent) : QWidget(parent), ui(new Ui::EditAnyTLS) {

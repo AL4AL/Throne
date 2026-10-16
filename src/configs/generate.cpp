@@ -26,6 +26,7 @@
 #endif
 
 #include <algorithm>
+#include <optional>
 #include <string_view>
 #include <srslist.h>
 
@@ -448,6 +449,8 @@ namespace Configs {
 
         // Build-scoped like buildProfileSink: scan clones shadow ids without ever reaching the repo.
         thread_local const QHash<int, std::shared_ptr<Profile>> *buildProfileOverrides = nullptr;
+
+        thread_local int offlineValidationDepth = 0;
 
         struct GenerateEndpointEntry {
             std::shared_ptr<Profile> live;
@@ -1766,9 +1769,13 @@ namespace Configs {
             QMutex mu;
             QThreadPool pool;
             pool.setMaxThreadCount(10);
+            // The offline scope is thread-local; carry it into the pool threads.
+            const bool offline = offlineValidationDepth > 0;
             for (int id : ids)
             {
                 pool.start([&, id] {
+                    std::optional<ScopedOfflineValidation> offlineScope;
+                    if (offline) offlineScope.emplace();
                     const auto ent = getProfile(id);
                     if (ent == nullptr || IsValid(ent)) return;
                     QMutexLocker lock(&mu);
@@ -2773,8 +2780,13 @@ namespace Configs {
         return inner;
     }
 
+    ScopedOfflineValidation::ScopedOfflineValidation() { offlineValidationDepth++; }
+
+    ScopedOfflineValidation::~ScopedOfflineValidation() { offlineValidationDepth--; }
+
     bool IsValid(const std::shared_ptr<Profile>& ent, bool *coreUnreachable)
     {
+        const bool offline = offlineValidationDepth > 0;
         const auto coreCallFailed = [coreUnreachable](const QString &resp) {
             MW_show_log("Failed to Call the Core: " + resp);
             if (coreUnreachable != nullptr) *coreUnreachable = true;
@@ -2838,6 +2850,7 @@ namespace Configs {
                 }
                 // Throne never runs these; it prepends its own bridge inbound instead.
                 xrayConf.remove("inbounds");
+                if (offline) return true;
                 bool ok;
                 auto resp = API::defaultClient->CheckConfig(&ok, QJsonObject2QString(xrayConf, true), true);
                 if (!ok) return coreCallFailed(resp);
@@ -2857,6 +2870,7 @@ namespace Configs {
                 MW_show_log("Invalid Xray ent " + ent->outbound->name + ": " + err);
                 return false;
             }
+            if (offline) return true;
             QJsonObject xrayConf{
                 {"outbounds", QJsonArray{out}},
             };
@@ -2887,6 +2901,7 @@ namespace Configs {
                 {key, outArr},
                 };
         }
+        if (offline) return true;
         bool ok;
         conf.insert("log", QJsonObject{{"level", dataManager->settingsRepo->log_level}});
         auto resp = API::defaultClient->CheckConfig(&ok, QJsonObject2QString(conf, true));

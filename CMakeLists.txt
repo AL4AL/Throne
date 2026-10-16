@@ -114,6 +114,8 @@ set(PROJECT_SOURCES
         src/global/VpnCredentialOverride.cpp
         include/global/RunningProfiles.hpp
         src/global/RunningProfiles.cpp
+        include/global/Notice.hpp
+        src/global/Notice.cpp
 
         3rdparty/qrcodegen.cpp
         3rdparty/QtExtKeySequenceEdit.cpp
@@ -264,6 +266,7 @@ set(PROJECT_SOURCES
         include/ui/utils/ScreenQrScanner.h
         src/ui/utils/ScreenQrScanner.cpp
         include/ui/utils/NoWheelComboBox.h
+        include/ui/utils/GuiUtils.hpp
         include/ui/utils/ValidationForm.h
         src/ui/utils/ValidationForm.cpp
 
@@ -493,7 +496,6 @@ set(PROJECT_SOURCES
         src/ui/profile/edit_ssh.cpp
         include/ui/profile/edit_ssh.h
         include/ui/profile/edit_ssh.ui
-        include/ui/mainwindow_interface.h
         include/stats/connections/connectionLister.hpp
         src/stats/connectionLister/connectionLister.cpp
         include/sys/windows/eventHandler.h
@@ -602,6 +604,7 @@ set(PROJECT_SOURCES
 
         include/database/entities/Profile.h
         include/database/entities/Group.h
+        include/database/entities/GroupSort.h
         include/database/entities/RouteProfile.h
         include/database/entities/RouteRule.h
         include/database/entities/OtpProfile.h
@@ -663,11 +666,37 @@ if (DASHBOARD_FILES)
             PROPERTY AUTORCC_OPTIONS "--compress-algo;zlib;--compress;9;--threshold;5")
 endif ()
 
+# Appended last so engine TUs form trailing MSVC unity batches: adding one never regroups the batches above.
+set(ENGINE_SOURCES
+        include/engine/EngineTr.h
+        include/engine/ThreadCheck.h
+        include/engine/Lifecycle.h
+        src/engine/Lifecycle.cpp
+        include/engine/EngineEvents.h
+        src/engine/EngineEvents.cpp
+        include/engine/app/Bootstrap.h
+        src/engine/app/Bootstrap.cpp
+        include/engine/app/DataDirLock.h
+        src/engine/app/DataDirLock.cpp
+        include/engine/app/ConfigDump.h
+        src/engine/app/ConfigDump.cpp
+)
+list(APPEND PROJECT_SOURCES ${ENGINE_SOURCES})
+
 # Qt exe
 qt_add_executable(Throne
         MANUAL_FINALIZATION
         ${PROJECT_SOURCES}
 )
+
+option(THRONE_ENGINE_LINT "Check the engine/UI boundary on every build" ON)
+if (THRONE_ENGINE_LINT)
+    add_custom_target(engine_boundary
+            COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -P ${CMAKE_SOURCE_DIR}/cmake/EngineBoundary.cmake
+            COMMENT "Checking the engine/UI boundary"
+            VERBATIM)
+    add_dependencies(Throne engine_boundary)
+endif ()
 
 # Target
 

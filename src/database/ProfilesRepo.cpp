@@ -6,7 +6,8 @@
 
 #include "include/database/GroupsRepo.h"
 #include "include/configs/common/OutboundFactory.h"
-#include "include/ui/mainwindow.h"
+#include "include/engine/Lifecycle.h"
+#include "include/global/Configs.hpp"
 
 
 namespace Configs {
@@ -403,7 +404,7 @@ namespace Configs {
     bool ProfilesRepo::BatchDeleteProfiles(QList<int>& ids, bool stopRunningProfile) {
         QSet<int> groupIDs;
         if (ids.contains(dataManager->settingsRepo->started_id)) {
-            if (stopRunningProfile) GetMainWindow()->profile_stop(false, true, false);
+            if (stopRunningProfile) Engine::Lifecycle::StopRunningProfile(false, true, false);
             else ids.removeAll(dataManager->settingsRepo->started_id);
         }
         auto profiles = GetProfileBatch(ids);

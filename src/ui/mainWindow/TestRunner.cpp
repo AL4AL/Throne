@@ -124,6 +124,11 @@ QString TestRunner::contextName(int entID) const {
     return MainWindow::tr("a tested profile");
 }
 
+int TestRunner::runningProfileId() const {
+    const auto running = mw_->runningSnapshot();
+    return running ? running->id : -1;
+}
+
 void TestRunner::applyUrlResult(const std::shared_ptr<Configs::Profile>& ent, const libcore::URLTestResp& res,
                                 const QHash<QString, bool>* vpnConnected) {
     const auto error = QString::fromStdString(res.error.value());
@@ -484,7 +489,7 @@ bool TestRunner::runSpeedTests(const QList<int>& requestedIDs, bool testCurrent,
             target.testCurrent = true;
             runSpeedProbe(target);
             testingCurrent_.store(false);
-            if (const auto running = mw_->running) tested[running->gid] << running->id;
+            if (const auto running = mw_->runningSnapshot()) tested[running->gid] << running->id;
         }
         // A speed test also credits the traffic it moved.
         Configs::RepositionLater(tested, Configs::SortInput::TestResult);
@@ -532,7 +537,7 @@ void TestRunner::pollSpeedTest(const QMap<QString, int>& tag2entID, bool testCur
     const libcore::SpeedTestResult result = res.result.value();
     const auto tag = QString::fromStdString(result.outbound_tag.value());
     // value(tag, -1), not operator[]: a const QMap yields 0 for a missing key.
-    auto profile = testCurrent ? mw_->running
+    auto profile = testCurrent ? mw_->runningSnapshot()
                                : Configs::dataManager->profilesRepo->GetProfile(tag2entID.value(tag, -1));
     if (profile == nullptr)
     {
@@ -569,7 +574,7 @@ void TestRunner::pollCountryTest(const QMap<QString, int>& tag2entID, bool testC
         mw_->dataViewHtmlGenerator_.addTestProgress();
         mw_->UpdateDataView();
         const auto tag = QString::fromStdString(result.outbound_tag.value());
-        auto profile = testCurrent ? mw_->running
+        auto profile = testCurrent ? mw_->runningSnapshot()
                                    : Configs::dataManager->profilesRepo->GetProfile(tag2entID.value(tag, -1));
         if (profile == nullptr)
         {
@@ -614,7 +619,7 @@ void TestRunner::runSpeedProbe(const Target& target)
         mw_->UpdateDataView();
     }
 
-    const int contextID = target.testCurrent ? (mw_->running ? mw_->running->id : -1) : target.entID;
+    const int contextID = target.testCurrent ? runningProfileId() : target.entID;
 
     bool rpcOK = false;
     QString coreError;
@@ -636,7 +641,7 @@ void TestRunner::runSpeedProbe(const Target& target)
 
     for (const auto& res : result.results) {
         const int entid = target.testCurrent
-                              ? (mw_->running ? mw_->running->id : -1)
+                              ? runningProfileId()
                               : resolveEntID(target.tag2entID, res.outbound_tag.value(), target.entID);
         if (entid == -1) {
             MW_show_log(MainWindow::tr("Something is very wrong, the subject ent cannot be found!"));

@@ -21,6 +21,9 @@ namespace Logging {
 
     void InstallQtMessageHandler();
 
+    // Mirrors file-bound lines at or above minLevel, and every user-log line, to stderr; works before Init(). Fatal always goes there.
+    void EnableStdSink(Level minLevel);
+
     // Messages logged before this are buffered in memory and replayed.
     void Init(const QString &baseDir);
 

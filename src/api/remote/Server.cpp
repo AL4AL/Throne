@@ -151,7 +151,7 @@ namespace RemoteApi {
     }
 
     void Server::Worker::Log(const QString &line) {
-        if (MW_show_log) MW_show_log(QStringLiteral("[API] ") + line);
+        MW_show_log(QStringLiteral("[API] ") + line);
     }
 
     // A dual-stack listener reports IPv4 peers as IPv4-mapped IPv6 addresses.

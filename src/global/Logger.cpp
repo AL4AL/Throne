@@ -2,6 +2,7 @@
 #include "NkrVersion.h"
 
 #include <atomic>
+#include <cstdio>
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -16,6 +17,9 @@
 
 #ifdef Q_OS_WIN
 #include <string>
+#endif
+#ifdef Q_OS_UNIX
+#include <sys/stat.h>
 #endif
 
 namespace Logging {
@@ -35,6 +39,10 @@ namespace Logging {
         bool g_initialized = false;
 
         std::atomic<int> g_level{static_cast<int>(Level::Debug)};
+
+        // Off: only Fatal reaches stderr.
+        std::atomic<int> g_stdLevel{static_cast<int>(Level::Off)};
+        QMutex g_stdMutex;
 
         // Buffering applies only before Init(); after it, a closed file means disk logging failed for good.
         QStringList g_preInit;
@@ -77,9 +85,12 @@ namespace Logging {
             return last;
         }
 
-        QString formatLine(Level level, const QString &message, const char *file, int line) {
-            QString out = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz");
-            out += " [";
+        QString formatTimestamp() {
+            return QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz");
+        }
+
+        QString formatBody(Level level, const QString &message, const char *file, int line) {
+            QString out = "[";
             out += QLatin1String(levelTag(level));
             out += "] [";
             out += QString::number(reinterpret_cast<quintptr>(QThread::currentThreadId()), 16);
@@ -93,6 +104,70 @@ namespace Logging {
             out += " | ";
             out += message;
             return out;
+        }
+
+        QString formatLine(Level level, const QString &message, const char *file, int line) {
+            return formatTimestamp() + ' ' + formatBody(level, message, file, line);
+        }
+
+        bool stdSinkEnabled() {
+            return g_stdLevel.load(std::memory_order_relaxed) < static_cast<int>(Level::Off);
+        }
+
+        bool stdSinkTakes(Level level) {
+            return level == Level::Fatal || static_cast<int>(level) >= g_stdLevel.load(std::memory_order_relaxed);
+        }
+
+        // JOURNAL_STREAM is inherited past redirections, so it only counts when its "dev:ino" is our stderr's (systemd.exec(5)).
+        bool journalStream() {
+#ifdef Q_OS_UNIX
+            static const bool journal = [] {
+                const QByteArray value = qgetenv("JOURNAL_STREAM");
+                const auto colon = value.indexOf(':');
+                if (colon <= 0) return false;
+                bool devOk = false;
+                bool inoOk = false;
+                const qulonglong dev = value.left(colon).toULongLong(&devOk);
+                const qulonglong ino = value.mid(colon + 1).toULongLong(&inoOk);
+                struct stat st{};
+                if (!devOk || !inoOk || ::fstat(::fileno(stderr), &st) != 0) return false;
+                return static_cast<qulonglong>(st.st_dev) == dev && static_cast<qulonglong>(st.st_ino) == ino;
+            }();
+            return journal;
+#else
+            return false;
+#endif
+        }
+
+        int journalPriority(Level level) {
+            switch (level) {
+                case Level::Fatal:
+                case Level::Error: return 3;
+                case Level::Warn: return 4;
+                case Level::Info: return 6;
+                default: return 7;
+            }
+        }
+
+        // journald takes the "<N>" priority prefix per line and stamps its own time.
+        void writeStd(Level level, const QString &timestamp, const QString &body) {
+#ifdef Q_OS_WIN
+            if (_fileno(stderr) < 0) return; // GUI-subsystem process without an inherited stderr
+#endif
+            QByteArray out;
+            if (journalStream()) {
+                const QByteArray prefix = "<" + QByteArray::number(journalPriority(level)) + ">";
+                out = prefix;
+                out += body.toUtf8().replace("\n", "\n" + prefix);
+            } else {
+                out = timestamp.toUtf8();
+                out += ' ';
+                out += body.toUtf8();
+            }
+            out += '\n';
+            QMutexLocker lock(&g_stdMutex);
+            std::fwrite(out.constData(), 1, static_cast<size_t>(out.size()), stderr);
+            std::fflush(stderr);
         }
 
         // Caller holds g_mutex.
@@ -201,21 +276,36 @@ namespace Logging {
         return static_cast<int>(level) >= g_level.load(std::memory_order_relaxed);
     }
 
+    void EnableStdSink(Level minLevel) { g_stdLevel.store(static_cast<int>(minLevel), std::memory_order_relaxed); }
+
     void Write(Level level, const QString &message, const char *file, int line) {
-        if (!IsEnabled(level)) return;
-        const QString formatted = formatLine(level, message, file, line);
-        QMutexLocker lock(&g_mutex);
-        writeLocked(formatted, level >= Level::Warn);
+        const bool toFile = IsEnabled(level);
+        const bool toStd = level == Level::Fatal || (toFile && stdSinkTakes(level));
+        if (!toFile && !toStd) return;
+        const QString timestamp = formatTimestamp();
+        const QString body = formatBody(level, message, file, line);
+        if (toFile) {
+            const QString formatted = timestamp + ' ' + body;
+            QMutexLocker lock(&g_mutex);
+            writeLocked(formatted, level >= Level::Warn);
+        }
+        if (toStd) writeStd(level, timestamp, body);
     }
 
     void WriteUserLog(const QString &message) {
         if (!IsEnabled(Level::Info)) return;
+        const bool toStd = stdSinkEnabled();
         for (const auto &line : message.split('\n')) {
             const QString trimmed = line.trimmed();
             if (trimmed.isEmpty()) continue;
-            const QString formatted = formatLine(Level::Info, "[ui] " + trimmed, nullptr, 0);
-            QMutexLocker lock(&g_mutex);
-            writeLocked(formatted, false);
+            const QString timestamp = formatTimestamp();
+            const QString body = formatBody(Level::Info, "[ui] " + trimmed, nullptr, 0);
+            {
+                const QString formatted = timestamp + ' ' + body;
+                QMutexLocker lock(&g_mutex);
+                writeLocked(formatted, false);
+            }
+            if (toStd) writeStd(Level::Info, timestamp, body);
         }
     }
 
@@ -365,6 +455,11 @@ namespace Logging {
             QString text = message;
             if (context.category != nullptr && qstrcmp(context.category, "default") != 0) {
                 text = QString("[%1] %2").arg(context.category, message);
+            }
+            if (type == QtFatalMsg) {
+                // A widget or GUI-only call reached a QCoreApplication (headless) process.
+                const auto *app = QCoreApplication::instance();
+                if (app != nullptr && !app->inherits("QApplication")) text.prepend(QStringLiteral("HEADLESS-WIDGET "));
             }
             Write(level, text, context.file, context.line);
             // Qt aborts the process the moment this returns for a fatal message.

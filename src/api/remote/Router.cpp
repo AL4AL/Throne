@@ -378,7 +378,7 @@ namespace RemoteApi {
 
     QJsonObject Router::statusJson() const {
         const auto &settings = Configs::dataManager->settingsRepo;
-        const auto running = mw_->running;
+        const auto running = mw_->runningSnapshot();
         const auto route = Configs::dataManager->routesRepo->GetRouteProfile(settings->current_route_id);
         return {
             {"state", RouterImpl::connectionStateName(mw_->connection_state())},
@@ -399,7 +399,7 @@ namespace RemoteApi {
     }
 
     QJsonObject Router::profileJson(const std::shared_ptr<Configs::Profile> &profile) const {
-        const auto running = mw_->running;
+        const auto running = mw_->runningSnapshot();
         int latency = profile->latency;
         if (latency < 0 && latency != Configs::kLatencyConnectOnly) latency = -1;
         return {
@@ -507,7 +507,7 @@ namespace RemoteApi {
 
     std::optional<Response> Router::launch(int profileId, bool restart, const WaiterPtr &waiter) {
         if (connectionBusy()) return RouterImpl::busyConnection();
-        const auto running = mw_->running;
+        const auto running = mw_->runningSnapshot();
         if (!restart && running != nullptr && running->id == profileId) return Response::Ok(statusJson());
         const quint64 serial = mw_->next_start_serial();
         if (waiter != nullptr) {
@@ -837,7 +837,7 @@ namespace RemoteApi {
 
     void Router::getLiveStats(const Request &, const Responder &respond, int) {
         MainWindow::LiveRates rates;
-        if (mw_->running != nullptr && !Configs::dataManager->settingsRepo->disable_traffic_stats && mw_->m_liveRatesAt.isValid() &&
+        if (mw_->runningSnapshot() != nullptr && !Configs::dataManager->settingsRepo->disable_traffic_stats && mw_->m_liveRatesAt.isValid() &&
             !mw_->m_liveRatesAt.hasExpired(RouterImpl::kLiveRatesFreshMs)) {
             rates = mw_->m_liveRates;
         }

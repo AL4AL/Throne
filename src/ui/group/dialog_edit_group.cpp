@@ -1,7 +1,5 @@
 #include "include/ui/group/dialog_edit_group.h"
 
-#include "include/ui/mainwindow_interface.h"
-
 #include <QClipboard>
 #include <QHash>
 #include <QStringListModel>

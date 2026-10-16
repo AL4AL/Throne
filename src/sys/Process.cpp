@@ -1,14 +1,12 @@
 #include "include/sys/Process.hpp"
+#include "include/engine/EngineEvents.h"
+#include "include/engine/Lifecycle.h"
 #include "include/global/Configs.hpp"
 #include "include/global/Logger.hpp"
+#include "include/global/Notice.hpp"
 
 #include <QTimer>
 #include <QDir>
-#include <QApplication>
-
-
-
-#include "include/ui/mainwindow.h"
 
 namespace {
     // Must match egressForwardingMarker in core/internal/rpc/forwarding_windows.go.
@@ -20,11 +18,11 @@ namespace {
         const auto from = at + qsizetype(sizeof(kEgressForwardingMarker) - 1);
         const auto end = log.indexOf('\n', from);
         const auto adapter = QString::fromUtf8(log.mid(from, end < 0 ? -1 : end - from)).trimmed();
-        PostPassiveWarning(QObject::tr("IPv4 forwarding breaks Tun mode"),
-                           QObject::tr("IPv4 forwarding is on for the network adapter \"%1\", usually because Mobile Hotspot or Internet Connection Sharing is sharing it.\n\n"
-                                       "Windows then ignores the adapter binding that keeps Throne's own connections out of the Tun, so they loop back into it and fail.\n\n"
-                                       "To fix this, share the hotspot from the throne-tun adapter instead of \"%1\" (Settings > Mobile hotspot > Share my internet connection from), or turn the hotspot off while using Tun mode.")
-                               .arg(adapter));
+        PostNotice({NoticeLevel::Warning, QObject::tr("IPv4 forwarding breaks Tun mode"),
+                    QObject::tr("IPv4 forwarding is on for the network adapter \"%1\", usually because Mobile Hotspot or Internet Connection Sharing is sharing it.\n\n"
+                                "Windows then ignores the adapter binding that keeps Throne's own connections out of the Tun, so they loop back into it and fail.\n\n"
+                                "To fix this, share the hotspot from the throne-tun adapter instead of \"%1\" (Settings > Mobile hotspot > Share my internet connection from), or turn the hotspot off while using Tun mode.")
+                        .arg(adapter)});
     }
 }
 
@@ -46,7 +44,7 @@ namespace Configs_sys {
             if (log.contains("Extra process exited unexpectedly"))
             {
                 MW_show_log("Extra Core exited, stopping profile...");
-                MW_dialog_message(MwMessage::CoreCrashed, {});
+                Engine::EngineEvents::ExtraCoreExited();
             }
             warnEgressForwarding(log);
             if (logCounter.fetchAndAddRelaxed(log.count("\n")) > Configs::dataManager->settingsRepo->max_log_line) return;
@@ -83,7 +81,7 @@ namespace Configs_sys {
 
                 MW_show_log("[Fatal] " + QObject::tr("Core exited, cleaning up..."));
 
-                GetMainWindow()->profile_stop(true, true);
+                Engine::Lifecycle::StopRunningProfile(true, true, false);
 
                 if (coreRestartTimer.isValid()) {
                     if (coreRestartTimer.restart() < 10 * 1000) {

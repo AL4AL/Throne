@@ -17,6 +17,8 @@
 #include "include/configs/sub/RouteUpdater.hpp"
 #include "include/database/GroupsRepo.h"
 #include "include/database/RoutesRepo.h"
+#include "include/engine/ThreadCheck.h"
+#include "include/global/Logger.hpp"
 #include "include/global/PeriodicRunner.hpp"
 #include "include/sys/AutoRun.hpp"
 #include "include/sys/KillSwitch.hpp"
@@ -282,6 +284,7 @@ void MainWindow::import_text(const QString &text) {
 }
 
 void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
+    ENGINE_CHECK_MAIN_THREAD();
     const auto changed = [&](const QString &flag) { return args.contains(flag); };
     auto &settings = Configs::dataManager->settingsRepo;
 
@@ -397,7 +400,7 @@ void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
         break;
     case MwMessage::CoreStarted:
         m_guardCoreRestart.invalidate();
-        Configs::IsAdmin(true);
+        LOG_INFO(QString("elevated: %1").arg(Configs::IsAdmin(true) ? "yes" : "no"));
         // The core may just have been given root, which the guard needs too.
         if (Sys::KillSwitch::instance()->failedForPrivileges()) Sys::KillSwitch::instance()->apply();
         if (settings->remember_enable && settings->remember_system_proxy) {

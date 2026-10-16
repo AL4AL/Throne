@@ -7,7 +7,9 @@
 #include "include/configs/sub/SubscriptionScan.hpp"
 #include "include/database/GroupsRepo.h"
 #include "include/database/ProfilesRepo.h"
+#include "include/engine/EngineEvents.h"
 #include "include/global/HTTPRequestHelper.hpp"
+#include "include/global/Notice.hpp"
 #include "include/global/Utils.hpp"
 
 #include <QCoreApplication>
@@ -243,7 +245,7 @@ namespace Subscription {
         }
 
         void reportDeleteFailure() {
-            PostPassiveWarning("Internal error", "DB Error when deleting profiles, data may be corrupted");
+            PostNotice({NoticeLevel::Error, "Internal error", "DB Error when deleting profiles, data may be corrupted"});
         }
 
         QString notice(const QStringList &names, const QString &prefix, const QString &action) {
@@ -555,7 +557,7 @@ namespace Subscription {
             group->url = content;
             // Stored before the download: a failed one is fixed through the group's own TLS, HTTP and User Agent settings.
             Configs::dataManager->groupsRepo->AddGroup(group);
-            MW_dialog_message(MwMessage::SubscriptionNewGroup, {});
+            Engine::EngineEvents::SubscriptionNewGroup();
             refresh(group->id, Surface::Report);
             emit asyncUpdateCallback(group->id);
         }, finish});
@@ -630,7 +632,7 @@ namespace Subscription {
             sink.finish();
             const int count = sink.stored();
             settings->imported_count = count;
-            MW_dialog_message(MwMessage::SubscriptionFinished, {Int2String(count)});
+            Engine::EngineEvents::SubscriptionFinished(count, false);
             emit asyncUpdateCallback(-1);
         }, finish});
     }
@@ -810,9 +812,9 @@ namespace Subscription {
         if (report.hasProblems()) {
             logImportReport(report);
             ShowImportReport(QCoreApplication::translate("Validation", "Import"), report);
-            MW_dialog_message(MwMessage::SubscriptionFinished, {MwArg::Quiet});
+            Engine::EngineEvents::SubscriptionFinished(-1, true);
         } else {
-            MW_dialog_message(MwMessage::SubscriptionFinished, {Int2String(count)});
+            Engine::EngineEvents::SubscriptionFinished(count, false);
         }
     }
 
@@ -908,7 +910,7 @@ namespace Subscription {
             }
             const auto outcome = deleteProfiles(doomed);
             if (!outcome.ok) {
-                PostPassiveWarning("Internal Error", "DB Error when deleting profiles, Please try again.");
+                PostNotice({NoticeLevel::Error, "Internal Error", "DB Error when deleting profiles, Please try again."});
                 return;
             }
             disturbed = outcome.deleted;
@@ -1038,15 +1040,13 @@ namespace Subscription {
                 diffBody += "\n\n" + QCoreApplication::translate("Validation", "Problems:") + "\n" + report.summary();
                 if (const auto details = report.details(); !details.isEmpty()) diffBody += "\n" + details;
             }
-            runOnUiThread([diffTitle, diffBody] { MessageBoxScrollable(diffTitle, diffBody); });
+            Engine::EngineEvents::SubscriptionDiff(diffTitle, diffBody);
         } else if (surface != Surface::Log && report.hasProblems()) {
             ShowImportReport(reportTitle(surface, group->name), report);
         }
         // Auto selectors resolve members from the group at build time, so a refresh can invalidate an untouched one.
-        QStringList selectorArgs{Int2String(group->id)};
-        for (int id : disturbed) selectorArgs << Int2String(id);
-        MW_dialog_message(MwMessage::SubscriptionGroupChanged, selectorArgs);
-        MW_dialog_message(MwMessage::SubscriptionFinished, {MwArg::Quiet});
+        Engine::EngineEvents::SubscriptionGroupChanged(group->id, disturbed);
+        Engine::EngineEvents::SubscriptionFinished(-1, true);
 
         if (options.url_test) requestUrlTest(gid, members());
     }
@@ -1072,9 +1072,7 @@ namespace Subscription {
         const auto deleted = removeUnavailableAndSort(group, options, report);
         if (!report.isEmpty()) MW_show_log("<<<<<<<< " + QObject::tr("After the URL test of %1:").arg(group->name) + report);
 
-        QStringList selectorArgs{Int2String(gid)};
-        for (int id : deleted) selectorArgs << Int2String(id);
-        MW_dialog_message(MwMessage::SubscriptionGroupChanged, selectorArgs);
-        MW_dialog_message(MwMessage::SubscriptionFinished, {MwArg::Quiet});
+        Engine::EngineEvents::SubscriptionGroupChanged(gid, deleted);
+        Engine::EngineEvents::SubscriptionFinished(-1, true);
     }
 } // namespace Subscription

@@ -145,6 +145,7 @@ void MainWindow::refresh_status(const QString &traffic_update) {
 
     refresh_speed_label();
 
+    const auto running = runningSnapshot();
     QString group_name;
     if (running != nullptr) {
         auto group = Configs::dataManager->groupsRepo->GetGroup(running->gid);
@@ -233,6 +234,7 @@ void MainWindow::refresh_startstop_button() {
     if (btn == nullptr) return;
 
     const auto &settings = Configs::dataManager->settingsRepo;
+    const auto running = runningSnapshot();
 
     auto mode = StartStopButton::Mode::Off;
     if (running != nullptr) {

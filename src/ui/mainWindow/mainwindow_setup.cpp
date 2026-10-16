@@ -11,6 +11,9 @@
 
 #include "include/configs/sub/GroupUpdater.hpp"
 #include "include/configs/sub/RouteUpdater.hpp"
+#include "include/engine/EngineEvents.h"
+#include "include/engine/Lifecycle.h"
+#include "include/engine/ThreadCheck.h"
 #include "include/global/PeriodicRunner.hpp"
 #include "include/global/Logger.hpp"
 #include "include/scanner/IpListUpdater.h"
@@ -126,12 +129,12 @@ static bool themeUsesDarkLog(const QString &theme) {
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
     mainwindow = this;
     setAcceptDrops(true);
-    MW_dialog_message = [=,this](MwMessage cmd, QStringList args) {
+    SetDialogMessageSink([=,this](MwMessage cmd, const QStringList &args) {
         runOnUiThread([=,this]
         {
             dialog_message_impl(cmd, args);
         });
-    };
+    });
     MW_handle_deeplink = [=,this](const QString &url) {
         runOnUiThread([=,this]
         {
@@ -144,6 +147,35 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             importFromFiles(paths);
         });
     };
+
+    // AutoConnection, like the old runOnUiThread hop: direct for emits on the main thread, queued from workers.
+    auto *engineEvents = Engine::EngineEvents::instance();
+    connect(engineEvents, &Engine::EngineEvents::subscriptionNewGroup, this, [this] {
+        dialog_message_impl(MwMessage::SubscriptionNewGroup, {});
+    });
+    connect(engineEvents, &Engine::EngineEvents::subscriptionFinished, this, [this](int importedCount, bool quiet) {
+        QStringList args;
+        if (quiet) args << MwArg::Quiet;
+        else if (importedCount >= 0) args << Int2String(importedCount);
+        dialog_message_impl(MwMessage::SubscriptionFinished, args);
+    });
+    connect(engineEvents, &Engine::EngineEvents::subscriptionGroupChanged, this, [this](int groupId, const QList<int> &disturbedProfileIds) {
+        QStringList args{Int2String(groupId)};
+        for (const int id : disturbedProfileIds) args << Int2String(id);
+        dialog_message_impl(MwMessage::SubscriptionGroupChanged, args);
+    });
+    connect(engineEvents, &Engine::EngineEvents::subscriptionDiff, this, [](const QString &title, const QString &body) {
+        MessageBoxScrollable(title, body);
+    });
+    connect(engineEvents, &Engine::EngineEvents::groupOrderChanged, this, [this](const QList<int> &groupIds) {
+        QStringList args;
+        for (const int id : groupIds) args << Int2String(id);
+        dialog_message_impl(MwMessage::GroupOrderChanged, args);
+    });
+    connect(engineEvents, &Engine::EngineEvents::extraCoreExited, this, [this] {
+        dialog_message_impl(MwMessage::CoreCrashed, {});
+    });
+    Engine::Lifecycle::SetStopHandler([this](bool crash, bool block, bool manual) { profile_stop(crash, block, manual); });
 
     AutoRun_FixTaskIfNeeded();
     AutoRun_MigrateIfNeeded();
@@ -187,10 +219,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         applyLogBrowserFont();
         scheduleProxyListRefresh();
     });
-    MW_show_log = [=,this](const QString &log) {
+    SetUserLogSink([=,this](const QString &log) {
         append_log(log);
         Logging::WriteUserLog(log);
-    };
+    });
 
     if (Configs::dataManager->settingsRepo->random_inbound_port)
     {
@@ -213,6 +245,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     }
 
     connect(core_server, &QLocalServer::newConnection, this, [=, this]() {
+        ENGINE_CHECK_MAIN_THREAD();
         auto socket = core_server->nextPendingConnection();
         int profileId = -1;
         {
@@ -231,7 +264,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         }
         setup_rpc(socket);
         Configs::dataManager->settingsRepo->core_running = true;
-        LOG_INFO(QString("elevated: %1").arg(Configs::IsAdmin() ? "yes" : "no"));
         MW_dialog_message(MwMessage::CoreStarted, {Int2String(profileId)});
     });
 
@@ -272,7 +304,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(ui->menu_start, &QAction::triggered, this, [=,this]() { profile_start(); });
     connect(ui->menu_stop, &QAction::triggered, this, [=,this]() { profile_stop(false, false, true); });
     connect(ui->toolButton_startstop, &QAbstractButton::clicked, this, [=,this]() {
-        if (running != nullptr) profile_stop(false, false, true);
+        if (runningSnapshot() != nullptr) profile_stop(false, false, true);
         else profile_start();
     });
     ui->toolButton_startstop->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -658,7 +690,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     trayConnectAction = new QAction(tr("Connect"), trayMenu);
     connect(trayConnectAction, &QAction::triggered, this, [this]() {
-        if (running != nullptr) profile_stop(false, false, true);
+        if (runningSnapshot() != nullptr) profile_stop(false, false, true);
         else profile_start();
     });
     trayMenu->addAction(trayConnectAction);
@@ -777,7 +809,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     });
 
     connect(ui->menuTools, &QMenu::aboutToShow, this, [=,this](){
-        ui->actionSpeedtest_Current->setEnabled(running != nullptr);
+        ui->actionSpeedtest_Current->setEnabled(runningSnapshot() != nullptr);
     });
 
     connect(ui->actionAdd_New_Group, &QAction::triggered, this, [=,this]{
@@ -810,9 +842,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         auto id = Configs::dataManager->groupsRepo->CurrentGroup()->id;
         if (QMessageBox::question(this, tr("Confirmation"), tr("Remove %1?").arg(Configs::dataManager->groupsRepo->GetGroup(id)->name)) ==
             QMessageBox::StandardButton::Yes) {
-            if (running != nullptr) {
-                if (running->gid == id) profile_stop(false, true, false);
-            }
+            if (const auto running = runningSnapshot(); running != nullptr && running->gid == id) profile_stop(false, true, false);
             Configs::dataManager->groupsRepo->DeleteGroup(id);
             MW_dialog_message(MwMessage::GroupsChanged, {});
         }
@@ -880,7 +910,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             profilesMenu->addAction(action);
         }
 
-        ui->actionUpdate_Rule_Sets->setEnabled(running != nullptr && !m_ruleSetUpdateBusy);
+        ui->actionUpdate_Rule_Sets->setEnabled(runningSnapshot() != nullptr && !m_ruleSetUpdateBusy);
         ui->menuRouting_Menu->addAction(ui->actionUpdate_Rule_Sets);
 
         ui->menuRouting_Menu->addSeparator();
@@ -904,7 +934,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     });
     connect(ui->actionSpeedtest_Current, &QAction::triggered, this, [=,this]()
     {
-        if (running != nullptr)
+        if (runningSnapshot() != nullptr)
         {
             testRunner->runSpeedTests({}, true);
         }
@@ -1071,6 +1101,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 }
 
 MainWindow::~MainWindow() {
+    SetUserLogSink({});
+    SetDialogMessageSink({});
+    Engine::Lifecycle::SetStopHandler({});
     Subscription::updater()->SetUrlTester(nullptr);
     delete ui;
 }

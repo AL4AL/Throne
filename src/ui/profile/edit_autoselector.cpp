@@ -7,7 +7,6 @@
 #include "include/database/entities/Group.h"
 #include "include/database/entities/Profile.h"
 #include "include/stats/autoselector/AutoSelectorMonitor.hpp"
-#include "include/ui/mainwindow_interface.h"
 #include "include/ui/utils/ValidationForm.h"
 
 #include <QFormLayout>

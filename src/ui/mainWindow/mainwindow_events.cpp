@@ -150,10 +150,19 @@ void MainWindow::openTraySelector(bool routing) {
     cb.startProfile = [this](int id) { profile_start(id); };
     cb.stopProfile = [this]() { profile_stop(false, false, true); };
     cb.chooseRoute = [this](int id) { choose_route(id); };
-    cb.isRunning = [this]() { return running != nullptr; };
-    cb.runningId = [this]() { return running ? running->id : -1; };
-    cb.runningGid = [this]() { return running ? running->gid : -1; };
-    cb.runningName = [this]() { return running ? running->name : QString(); };
+    cb.isRunning = [this]() { return runningSnapshot() != nullptr; };
+    cb.runningId = [this]() {
+        const auto running = runningSnapshot();
+        return running ? running->id : -1;
+    };
+    cb.runningGid = [this]() {
+        const auto running = runningSnapshot();
+        return running ? running->gid : -1;
+    };
+    cb.runningName = [this]() {
+        const auto running = runningSnapshot();
+        return running ? running->name : QString();
+    };
 
     traySelector = new TrayProfileSelector(
         routing ? TrayProfileSelector::Routing : TrayProfileSelector::Server, cb, this);
@@ -200,7 +209,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
     }
     if (type == QEvent::MouseButtonPress) {
         auto mouseEvent = dynamic_cast<QMouseEvent *>(event);
-        if (obj == ui->label_running && mouseEvent->button() == Qt::LeftButton && running != nullptr) {
+        if (obj == ui->label_running && mouseEvent->button() == Qt::LeftButton && runningSnapshot() != nullptr) {
             url_test_current();
             return true;
         } else if (obj == ui->label_inbound && mouseEvent->button() == Qt::LeftButton) {

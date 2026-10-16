@@ -2,7 +2,7 @@
 
 #include <QClipboard>
 
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 
 #include <QFile>
 #include <QHostAddress>

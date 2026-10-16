@@ -22,6 +22,7 @@
 #include "include/database/GroupsRepo.h"
 #include "include/database/OtpProfilesRepo.h"
 #include "include/database/ProfilesRepo.h"
+#include "include/engine/ThreadCheck.h"
 #include "include/global/OtpPlaceholder.hpp"
 #include "include/global/RunningProfiles.hpp"
 #include "include/global/VpnCredentialOverride.hpp"
@@ -155,6 +156,7 @@ void MainWindow::profile_start(int _id) {
 }
 
 void MainWindow::profile_start(const StartRequest &request) {
+    ENGINE_CHECK_MAIN_THREAD();
     if (Configs::dataManager->settingsRepo->prepare_exit) {
         emit start_finished(request.serial, request.profileId, StartOutcome::Exiting, {});
         return;
@@ -370,7 +372,7 @@ void MainWindow::profile_start(const StartRequest &request) {
         Stats::SetVpnEndpointProfiles(result->vpnEndpointProfiles);
         Stats::connection_lister->SetOutboundNames(result->outboundNames);
         Configs::SetRunningProfiles(result->involvedProfiles);
-        running = ent;
+        setRunning(ent);
         if (Configs::dataManager->settingsRepo->spmode_system_proxy) set_system_proxy(true);
 
         const bool exitIsEndpoint = vpn_exit_endpoint(ent) != nullptr;
@@ -386,18 +388,22 @@ void MainWindow::profile_start(const StartRequest &request) {
             // "Only route advertised network" rejects this probe.
             if (exitIsEndpoint) return;
 
-            auto resp = NetworkRequestHelper::HttpGet("http://ip-api.com/json/", true);
-            if (resp.error.isEmpty()) {
-                QJsonDocument doc = QJsonDocument::fromJson(resp.data);
-                if (doc.isObject()) {
-                    QJsonObject obj = doc.object();
-                    QString city = obj["city"].toString();
-                    QString countryName = obj["country"].toString();
-                    QString countryCode = obj["countryCode"].toString();
-                    if (running) running->runningCountryInfo = QString("%1 %2, %3").arg(CountryCodeToFlag(countryCode), countryName, city);
+            // Off the UI thread: HttpGet spins a nested event loop that would re-enter API dispatch.
+            runOnNewThread([=, this] {
+                const auto resp = NetworkRequestHelper::HttpGet("http://ip-api.com/json/", true);
+                if (!resp.error.isEmpty()) return;
+                const QJsonDocument doc = QJsonDocument::fromJson(resp.data);
+                if (!doc.isObject()) return;
+                const QJsonObject obj = doc.object();
+                const QString city = obj["city"].toString();
+                const QString countryName = obj["country"].toString();
+                const QString countryCode = obj["countryCode"].toString();
+                runOnUiThread([=, this] {
+                    if (runningSnapshot() != ent) return;
+                    ent->runningCountryInfo = QString("%1 %2, %3").arg(CountryCodeToFlag(countryCode), countryName, city);
                     refresh_status();
-                }
-            }
+                });
+            });
         });
 
         return true;
@@ -437,7 +443,7 @@ void MainWindow::profile_start(const StartRequest &request) {
     });
 
     runOnNewThread([=, this] {
-        const bool switching = running != nullptr;
+        const bool switching = runningSnapshot() != nullptr;
         if (switching) {
             m_switchingProfile = true;
             profile_stop(false, false, true, resolved.interactive);
@@ -468,10 +474,11 @@ void MainWindow::profile_start(const StartRequest &request) {
 }
 
 void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interactive) {
-    if (running == nullptr) {
+    const auto current = runningSnapshot();
+    if (current == nullptr) {
         return;
     }
-    const auto id = running->id;
+    const auto id = current->id;
 
     auto profile_stop_stage2 = [=,this](const QPointer<RestartPrompt> &restartPrompt) {
         if (testRunner->isTestingCurrent()) {
@@ -531,7 +538,7 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interact
         }
 
         // Snapshot: `running` is cleared below and a racing start can reassign it.
-        const auto stopping = running;
+        const auto stopping = runningSnapshot();
         if (stopping != nullptr) {
             MW_show_log(">>>>>>>> " + tr("Stopping profile %1").arg(stopping->outbound->DisplayTypeAndName()));
         }
@@ -543,7 +550,7 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interact
         // Cleared here too: a restart prompt armed before the UI-thread teardown would have no id to start.
         Configs::ClearRunningProfiles();
         Stats::connection_lister->SetOutboundNames({});
-        running = nullptr;
+        setRunning(nullptr);
         const auto stoppedAt = MonotonicMs();
 
         runOnUiThread([=, this, &restartPrompt] {
@@ -593,7 +600,17 @@ int MainWindow::resolve_last_profile() {
 MainWindow::ConnectionState MainWindow::connection_state() const {
     if (m_profileConnecting) return ConnectionState::Connecting;
     if (m_profileDisconnecting) return ConnectionState::Stopping;
-    return running != nullptr ? ConnectionState::Running : ConnectionState::Idle;
+    return runningSnapshot() != nullptr ? ConnectionState::Running : ConnectionState::Idle;
+}
+
+std::shared_ptr<Configs::Profile> MainWindow::runningSnapshot() const {
+    QMutexLocker locker(&m_runningMutex);
+    return m_running;
+}
+
+void MainWindow::setRunning(std::shared_ptr<Configs::Profile> profile) {
+    QMutexLocker locker(&m_runningMutex);
+    m_running.swap(profile);
 }
 
 quint64 MainWindow::next_start_serial() {
@@ -602,7 +619,7 @@ quint64 MainWindow::next_start_serial() {
 
 void MainWindow::toggle_connection() {
     if (select_mode || m_profileConnecting || m_profileDisconnecting) return;
-    if (running != nullptr) {
+    if (runningSnapshot() != nullptr) {
         profile_stop(false, false, true);
         return;
     }
@@ -826,7 +843,7 @@ void MainWindow::update_vpn_endpoint_states(const QList<VpnEndpointState> &state
 }
 
 bool MainWindow::auto_answer_vpn_challenge(const VpnAuthChallenge &challenge) {
-    if (challenge.id.isEmpty() || running == nullptr) return false;
+    if (challenge.id.isEmpty() || runningSnapshot() == nullptr) return false;
     if (m_vpnChallengeAnswering.contains(challenge.endpointTag)) return true;
 
     const int profileID = Stats::VpnEndpointProfileID(challenge.endpointTag);
@@ -922,6 +939,7 @@ void MainWindow::submit_vpn_challenge_answer(const VpnAuthChallenge &challenge, 
 
 bool MainWindow::auto_restart_for_vpn_auth(const QString &endpointTag, int profileID) {
     const auto ent = Configs::dataManager->profilesRepo->GetProfile(profileID);
+    const auto running = runningSnapshot();
     if (ent == nullptr || running == nullptr) return false;
 
     int otpID = -1;
@@ -965,6 +983,7 @@ void MainWindow::show_vpn_challenge(const VpnAuthChallenge &challenge) {
 void MainWindow::show_vpn_auth_failure(const QString &endpointTag, const QString &error) {
     constexpr int maxPrompts = 3;
 
+    const auto running = runningSnapshot();
     if (m_vpnAuthDialog != nullptr || running == nullptr) return;
     const int profileID = Stats::VpnEndpointProfileID(endpointTag);
     if (profileID < 0) return;
@@ -1003,7 +1022,7 @@ void MainWindow::show_vpn_auth_failure(const QString &endpointTag, const QString
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     m_vpnAuthDialog = dialog;
     connect(dialog, &QDialog::accepted, this, [=, this] {
-        if (running == nullptr || running->id != runningID) return;
+        if (const auto current = runningSnapshot(); current == nullptr || current->id != runningID) return;
         Configs::SetVpnCredentialOverride(profileID, {dialog->enteredUsername(), dialog->enteredPassword()});
         m_vpnAuthRestartID = runningID;
         profile_start(runningID);

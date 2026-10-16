@@ -14,8 +14,6 @@
 #include <QtDBus>
 #endif
 
-#ifndef MW_INTERFACE
-
 #include <deque>
 #include <optional>
 #include <QKeyEvent>
@@ -41,15 +39,13 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 
-#include "group/GroupSort.hpp"
-#include "include/global/GuiUtils.hpp"
+#include "include/database/entities/GroupSort.h"
 #include "include/ui/setting/Icon.hpp"
 #include "include/ui/utils/DataViewHtmlGenerator.h"
+#include "include/ui/utils/GuiUtils.hpp"
 #include "include/ui/utils/ProfilesFilterProxyModel.h"
 #include "include/ui/utils/ProfilesTableModel.h"
 #include "ui_mainwindow.h"
-
-#endif
 
 namespace Configs_sys {
     class CoreProcess;
@@ -187,6 +183,9 @@ public:
 
     ConnectionState connection_state() const;
 
+    // Safe from any thread.
+    std::shared_ptr<Configs::Profile> runningSnapshot() const;
+
     quint64 next_start_serial();
 
     void set_spmode_system_proxy(bool enable, bool save = true);
@@ -249,8 +248,6 @@ public slots:
     void on_commitDataRequest();
 
     void on_menu_exit_triggered();
-
-#ifndef MW_INTERFACE
 
 private slots:
 
@@ -341,7 +338,10 @@ private:
     QTextDocument *qvLogDocument = new QTextDocument(this);
     QString title_error;
     std::optional<Icon::TrayIconStatus> icon_status;
-    std::shared_ptr<Configs::Profile> running;
+    // Written by the start/stop workers; read through runningSnapshot().
+    mutable QMutex m_runningMutex;
+    std::shared_ptr<Configs::Profile> m_running;
+    void setRunning(std::shared_ptr<Configs::Profile> profile);
     int last_running_profile_id = -1;
     bool m_profileConnecting = false;
     bool m_profileDisconnecting = false;
@@ -716,8 +716,6 @@ private:
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
-
-#endif // MW_INTERFACE
 };
 
 inline MainWindow *GetMainWindow() {
