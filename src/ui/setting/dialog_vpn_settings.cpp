@@ -3,7 +3,8 @@
 #include "include/ui/utils/GuiUtils.hpp"
 #include "include/global/Configs.hpp"
 #include "include/global/Validation.hpp"
-#include "include/ui/mainwindow.h"
+#include "include/engine/EngineHost.h"
+#include "include/engine/supervisor/CoreSupervisor.h"
 #include "include/ui/utils/ValidationForm.h"
 
 #include <QMessageBox>
@@ -134,6 +135,6 @@ void DialogVPNSettings::on_troubleshooting_clicked() {
 
     msg.exec();
     if (msg.clickedButton() == reset) {
-        GetMainWindow()->RestartCore();
+        Engine::host()->supervisor()->resetCore();
     }
 }

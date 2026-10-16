@@ -53,11 +53,9 @@ namespace Configs {
 }
 
 namespace Engine {
-    class AutoSelectorController;
     class ConnectionManager;
     class CoreSupervisor;
-    class EngineControl;
-    class StatsService;
+    class ExitController;
     class TestRunner;
     class VpnAuthController;
 }
@@ -66,7 +64,6 @@ class QMessageBox;
 class TrayProfileSelector;
 class TrayOtpCodes;
 class GlobalHotkeys;
-class MainWindowEngineControl;
 class DialogVpnAuth;
 class DialogScanner;
 class DialogIpLists;
@@ -99,21 +96,6 @@ public:
 
     ~MainWindow() override;
 
-    Engine::EngineControl *engineControl() const { return m_engineControl; }
-
-    Engine::EnginePolicy *policy() { return this; }
-
-    qint64 GetCorePid();
-    QString GetRunningConfigName();
-
-    // The two live VPN queries below block on an RPC; never call them from the UI thread.
-    static QString liveVpnConnectOkText();
-
-    static QString liveVpnStateText(bool *connected = nullptr);
-
-    // interactive false: a failing or slow stop of the running profile is logged, never shown.
-    void prepare_exit(bool interactive = true);
-
     void refresh_proxy_list(const QList<int> &ids = {}, bool mayNeedReset = false,
                             RefreshAnchor anchor = RefreshAnchor::KeepPlace);
 
@@ -145,9 +127,6 @@ public:
 
     void toggle_system_proxy();
 
-    // Engine half of MwMessage::UpdateSettings; its dialogs appear only when interactive.
-    void applySettingsChange(const QStringList &flags, bool interactive);
-
     void start_select_mode(QObject *context, const std::function<void(int)> &callback);
 
     // Returns a line per global hotkey that could not be registered.
@@ -156,8 +135,6 @@ public:
     bool IsGlobalHotkeySupported() const;
 
     bool StopVPNProcess();
-
-    void RestartCore();
 
     // Whole poll snapshot in the lister's order, never a delta. UI thread only.
     void UpdateConnectionList(const QList<Stats::ConnectionMetadata>& connections);
@@ -266,26 +243,22 @@ private:
     QPointer<TrayOtpCodes> trayOtpCodes;
     void openTrayOtpCodes();
     QThreadPool *parallelCoreCallPool = new QThreadPool(this);
-    std::unique_ptr<Engine::TestRunner> testRunner;
-    // After testRunner, so it is destroyed first.
-    std::unique_ptr<Engine::AutoSelectorController> m_autoSelector;
-    Engine::CoreSupervisor *m_coreSupervisor = nullptr;
-    Engine::StatsService *m_stats = nullptr;
-    Engine::ConnectionManager *m_connection = nullptr;
-    Engine::VpnAuthController *m_vpnAuth = nullptr;
+    // Engine::host()'s objects, in mainwindow_engine_control.cpp.
+    Engine::ConnectionManager *connection() const;
+    Engine::CoreSupervisor *supervisor() const;
+    Engine::TestRunner *tests() const;
+    Engine::VpnAuthController *vpnAuth() const;
+    Engine::ExitController *exitController() const;
     QTextDocument *qvLogDocument = new QTextDocument(this);
     QString title_error;
     std::optional<Icon::TrayIconStatus> icon_status;
     QString traffic_update_cache;
     qint64 last_test_time = 0;
     bool select_mode = false;
-    QMutex mu_exit;
     ExitReason exit_reason = ExitReason::None;
     // Set by request_unattended_exit: no dialog during the teardown, and a restart stays in the tray when the window was hidden.
     bool m_exitUnattended = false;
     bool m_exitKeepTray = false;
-    // From the start of on_menu_exit_triggered; its UAC wait pumps messages, so nested exit requests must back off.
-    bool m_exitInProgress = false;
     QMutex mu_download_update;
     QMutex mu_download_dashboard;
     class ConnectionsTreeModel *connectionsModel = nullptr;
@@ -308,7 +281,6 @@ private:
     class RuntimeStatsWidget *runtimeStatsWidget = nullptr;
     std::atomic<qint64> lastUpdatedMs = QDateTime::currentMSecsSinceEpoch();
     DataViewHtmlGenerator dataViewHtmlGenerator_;
-    Engine::EngineControl *m_engineControl = nullptr;
 
     QList<QShortcut*> hiddenMenuShortcuts;
     GlobalHotkeys *globalHotkeys = nullptr;
@@ -416,6 +388,9 @@ private:
     // Returns how many profiles it cleared.
     int clear_test_results(const QList<int> &profileIds);
 
+    // Geometry, size and splitter into the settings, unsaved.
+    void saveWindowState();
+
     void request_unattended_exit(ExitReason reason);
 
     // Runs after the user confirmed; title heads the warning when Engine::GroupService refuses.
@@ -516,8 +491,6 @@ private:
 
     void OpenDashboard();
 
-    void SeedDashboard();
-
     void setupConnectionList();
 
     void setupTrafficGraph();
@@ -559,7 +532,7 @@ private:
 
     void refreshConnectionIcons();
 
-    // EnginePolicy, in mainwindow_policy.cpp; reached through policy().
+    // EnginePolicy, in mainwindow_policy.cpp; reached through EngineHost::policy().
     void geoAssetMissingCategory(const QString &contextName, const QString &needed, const QString &whichFile) override;
 
     bool confirmGeoAssetDownload(const QString &contextName) override;
@@ -603,6 +576,8 @@ private:
 
     bool pickInsteadOfStart(int profileId) override;
 
+    void exitProgram(ExitReason reason, bool unattended) override;
+
     // TestObserver, in mainwindow_view.cpp; synchronous, so a panel seed never lands after the next session's clear.
     void testPanelSeeded(Engine::TestKind kind, int totalProfiles) override;
 
@@ -616,8 +591,6 @@ private:
 
     void testedProfilesChanged(const QList<int> &profileIds) override;
 
-    friend class MainWindowEngineControl;
-
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
 };
@@ -626,7 +599,7 @@ inline MainWindow *GetMainWindow() {
     return qobject_cast<MainWindow *>(mainwindow);
 }
 
-void UI_InitMainWindow();
+MainWindow *UI_InitMainWindow();
 
 #ifdef Q_OS_LINUX
 class OrgFreedesktopPortalRequestInterface : public QDBusAbstractInterface

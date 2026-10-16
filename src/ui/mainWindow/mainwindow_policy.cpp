@@ -3,6 +3,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 
+#include "include/engine/app/ExitController.h"
 #include "include/engine/connection/ConnectionManager.h"
 #include "include/sys/KillSwitch.hpp"
 #include "include/ui/profile/dialog_vpn_auth.h"
@@ -77,7 +78,7 @@ void MainWindow::killSwitchProblem() {
         const auto *clicked = box->clickedButton();
         if (m_killSwitchDialog == box) m_killSwitchDialog = nullptr;
         if (clicked == disable) {
-            m_connection->disableKillSwitch();
+            connection()->disableKillSwitch();
             return;
         }
         if (clicked != fix) return;
@@ -86,14 +87,10 @@ void MainWindow::killSwitchProblem() {
             return;
         }
 #ifdef Q_OS_WIN
-        // Queued: ShellExecuteEx's UAC pump runs this box's deleteLater, so exiting from here frees it under QMessageBox (#1961).
-        QMetaObject::invokeMethod(this, [this] {
-            exit_reason = ExitReason::RestartElevated;
-            on_menu_exit_triggered();
-        }, Qt::QueuedConnection);
+        exitController()->requestExit(ExitReason::RestartElevated, false);
 #else
         // Otherwise the core restarts once it is privileged, and onCoreStarted retries.
-        if (m_connection->ensureTunPrivileges(true)) Sys::KillSwitch::instance()->apply();
+        if (connection()->ensureTunPrivileges(true)) Sys::KillSwitch::instance()->apply();
 #endif
     });
     box->open();
@@ -218,7 +215,7 @@ bool MainWindow::vpnPromptOpen() const {
 }
 
 void MainWindow::vpnChallenge(const VpnAuthChallenge &challenge) {
-    auto *dialog = new DialogVpnAuth(this, m_vpnAuth, challenge);
+    auto *dialog = new DialogVpnAuth(this, vpnAuth(), challenge);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     m_vpnAuthDialog = dialog;
     dialog->show();
@@ -227,7 +224,7 @@ void MainWindow::vpnChallenge(const VpnAuthChallenge &challenge) {
 
 void MainWindow::vpnCredentialsRejected(int, const VpnAuthChallenge &challenge,
                                         const std::function<void(const QString &username, const QString &password)> &retryWith) {
-    auto *dialog = new DialogVpnAuth(this, m_vpnAuth, challenge, true);
+    auto *dialog = new DialogVpnAuth(this, vpnAuth(), challenge, true);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     m_vpnAuthDialog = dialog;
     connect(dialog, &QDialog::accepted, this, [dialog, retryWith] {
@@ -251,6 +248,15 @@ bool MainWindow::confirmRestartProgram() {
 
 void MainWindow::testSessionBusy(const QString &text) {
     MessageBoxWarning(software_name, text);
+}
+
+void MainWindow::exitProgram(ExitReason reason, bool unattended) {
+    if (unattended) {
+        request_unattended_exit(reason);
+        return;
+    }
+    exit_reason = reason;
+    on_menu_exit_triggered();
 }
 
 bool MainWindow::pickInsteadOfStart(int profileId) {

@@ -52,4 +52,10 @@ namespace Stats {
     std::shared_ptr<Configs::Profile> VpnExitEndpoint(const std::shared_ptr<Configs::Profile> &ent);
 
     QString VpnExitStateText(const QString &state, const QString &error);
+
+    // The running profile's VPN exit state; blocks on an RPC, so never call it from the UI thread. Empty without one.
+    QString LiveVpnStateText(bool *connected = nullptr);
+
+    // LiveVpnStateText, but only once connected.
+    QString LiveVpnConnectOkText();
 } // namespace Stats

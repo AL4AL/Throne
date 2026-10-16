@@ -128,7 +128,7 @@ QString MainWindow::restartReasonText(Engine::RestartReason reason)
 void MainWindow::showRestartReasons()
 {
     QStringList reasons;
-    for (const auto reason : m_connection->restartReasons()) reasons << restartReasonText(reason);
+    for (const auto reason : connection()->restartReasons()) reasons << restartReasonText(reason);
     dataViewHtmlGenerator_.setPendingRestartReasons(reasons);
     UpdateDataView(true);
 }
@@ -206,7 +206,7 @@ void MainWindow::refresh_status(const QString &traffic_update) {
         if (group != nullptr) group_name = group->name;
     }
 
-    const QString vpnExitState = m_vpnAuth->exitStateText();
+    const QString vpnExitState = vpnAuth()->exitStateText();
     const QString runningDetail = vpnExitState.isEmpty()
                                       ? (running ? running->runningCountryInfo : QString())
                                       : vpnExitState;
@@ -284,7 +284,7 @@ void MainWindow::refresh_startstop_button() {
 
     const auto &settings = Configs::dataManager->settingsRepo;
     const auto running = runningSnapshot();
-    const auto connState = m_connection->connectionState();
+    const auto connState = connection()->connectionState();
     const bool connecting = connState == ConnectionState::Connecting;
     const bool disconnecting = connState == ConnectionState::Stopping;
 
@@ -512,27 +512,6 @@ void MainWindow::refresh_proxy_list_impl_refresh_data(const QList<int>& ids, boo
     }
 }
 
-QString MainWindow::liveVpnStateText(bool *connected) {
-    if (connected != nullptr) *connected = false;
-    const int startedID = Configs::dataManager->settingsRepo->started_id;
-    if (startedID < 0) return {};
-    if (Stats::VpnExitEndpoint(Configs::dataManager->profilesRepo->GetProfile(startedID)) == nullptr) return {};
-
-    bool ok = false;
-    const auto status = API::defaultClient->QueryVPNStatus(&ok, {"proxy"});
-    if (!ok || status.results.empty()) return {};
-    const auto &res = status.results.front();
-    if (connected != nullptr) *connected = res.connected.value();
-    return Stats::VpnExitStateText(QString::fromStdString(res.state.value()),
-                                   QString::fromStdString(res.error.value()));
-}
-
-QString MainWindow::liveVpnConnectOkText() {
-    bool connected = false;
-    const auto text = liveVpnStateText(&connected);
-    return connected ? text : QString();
-}
-
 void MainWindow::url_test_current() {
     last_test_time = QDateTime::currentSecsSinceEpoch();
     ui->label_running->setText(tr("Testing"));
@@ -549,7 +528,7 @@ void MainWindow::url_test_current() {
         auto latency = result.results[0].latency_ms.value();
         last_test_time = QDateTime::currentSecsSinceEpoch();
         // Blocking RPC, so it has to resolve here rather than on the UI thread.
-        const auto vpnText = latency <= 0 ? liveVpnStateText() : QString();
+        const auto vpnText = latency <= 0 ? Stats::LiveVpnStateText() : QString();
 
         runOnUiThread([=,this] {
             if (!result.results[0].error.value().empty()) {

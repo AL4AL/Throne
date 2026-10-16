@@ -4,6 +4,7 @@
 #include <QPointer>
 #include <QTimer>
 
+#include "include/engine/EngineHost.h"
 #include "include/engine/vpn/VpnEndpoints.h"
 #include "include/global/Configs.hpp"
 #include "include/sys/KillSwitch.hpp"
@@ -114,5 +115,13 @@ namespace Engine {
 
     bool HeadlessPolicy::pickInsteadOfStart(int) {
         return false;
+    }
+
+    void HeadlessPolicy::exitProgram(ExitReason reason, bool) {
+        // A teardown already running: exit() here would end its nested waits early.
+        if (Configs::dataManager->settingsRepo->prepare_exit) return;
+        MW_show_log(reason == ExitReason::Restart ? QStringLiteral("Exiting to be restarted.") : QStringLiteral("Exiting."));
+        if (auto *engine = host()) engine->shutdown(false);
+        QCoreApplication::exit(reason == ExitReason::Restart ? 75 : 0);
     }
 } // namespace Engine

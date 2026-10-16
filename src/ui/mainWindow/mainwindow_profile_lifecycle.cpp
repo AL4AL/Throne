@@ -10,8 +10,8 @@ int MainWindow::get_profile_to_start() {
         return ents.first();
     }
     if (ents.isEmpty()) {
-        if (m_connection->lastProfileId() >= 0 && Configs::dataManager->profilesRepo->GetProfile(m_connection->lastProfileId()) != nullptr) {
-            return m_connection->lastProfileId();
+        if (connection()->lastProfileId() >= 0 && Configs::dataManager->profilesRepo->GetProfile(connection()->lastProfileId()) != nullptr) {
+            return connection()->lastProfileId();
         }
         const int rememberId = Configs::dataManager->settingsRepo->remember_id;
         if (rememberId >= 0 && Configs::dataManager->profilesRepo->GetProfile(rememberId) != nullptr) {
@@ -33,23 +33,23 @@ int MainWindow::get_profile_to_start() {
 
 void MainWindow::profile_start(int _id) {
     if (_id < 0) _id = get_profile_to_start();
-    m_connection->start(StartRequest{_id});
+    connection()->start(StartRequest{_id});
 }
 
 void MainWindow::profile_stop(bool crash, bool block, bool manual, bool interactive) {
-    m_connection->stop({crash, block, manual, interactive});
+    connection()->stop({crash, block, manual, interactive});
 }
 
 std::shared_ptr<Configs::Profile> MainWindow::runningSnapshot() const {
-    return m_connection->runningSnapshot();
+    return connection()->runningSnapshot();
 }
 
 void MainWindow::toggle_connection() {
-    const auto state = m_connection->connectionState();
+    const auto state = connection()->connectionState();
     if (select_mode || state == ConnectionState::Connecting || state == ConnectionState::Stopping) return;
     if (runningSnapshot() != nullptr) {
         profile_stop(false, false, true);
         return;
     }
-    profile_start(m_connection->resolveLastProfile());
+    profile_start(connection()->resolveLastProfile());
 }

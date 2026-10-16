@@ -111,4 +111,19 @@ namespace Engine::ProfileService {
         EngineEvents::ProfilesRemoved(del_ids);
         return static_cast<int>(del_ids.size());
     }
+
+    int ClearTestResults(const QList<int> &profileIds, QList<int> *groupIds) {
+        ENGINE_CHECK_MAIN_THREAD();
+        if (groupIds != nullptr) groupIds->clear();
+        const auto ents = Configs::dataManager->profilesRepo->GetProfileBatch(profileIds);
+        if (ents.empty()) return 0;
+        QSet<int> gids;
+        for (const auto &ent: ents) {
+            ent->ClearTestResults();
+            gids.insert(ent->gid);
+        }
+        Configs::dataManager->profilesRepo->SaveBatch(ents);
+        if (groupIds != nullptr) *groupIds = gids.values();
+        return static_cast<int>(ents.size());
+    }
 } // namespace Engine::ProfileService

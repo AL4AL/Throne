@@ -16,8 +16,11 @@
 #include "include/api/RPC.h"
 #include "include/api/remote/Server.hpp"
 #include "include/configs/generate.h"
+#include "include/engine/EngineHost.h"
 #include "include/engine/ThreadCheck.h"
+#include "include/engine/app/ExitController.h"
 #include "include/engine/connection/ConnectionManager.h"
+#include "include/engine/services/Dashboard.h"
 #include "include/engine/supervisor/CoreSupervisor.h"
 #include "include/global/Configs.hpp"
 #include "include/global/HTTPRequestHelper.hpp"
@@ -40,16 +43,6 @@
 #include "3rdparty/WinCommander.hpp"
 #include "include/sys/windows/WinVersion.h"
 #endif
-
-qint64 MainWindow::GetCorePid() {
-    return m_coreSupervisor->corePid();
-}
-
-QString MainWindow::GetRunningConfigName() {
-    auto ent = runningSnapshot();
-    if (ent == nullptr || ent->outbound == nullptr) return {};
-    return ent->outbound->DisplayTypeAndName();
-}
 
 void MainWindow::on_menu_basic_settings_triggered() {
     USE_DIALOG(DialogBasicSettings)
@@ -94,9 +87,7 @@ void MainWindow::on_menu_integration_settings_triggered() {
     dialog->show();
 }
 
-void MainWindow::on_commitDataRequest() {
-    qDebug() << "Start of data save";
-
+void MainWindow::saveWindowState() {
     auto* settings = Configs::dataManager->settingsRepo.get();
 
     settings->mainWindowGeometry = this->saveGeometry().toBase64(QByteArray::Base64Encoding);
@@ -105,55 +96,17 @@ void MainWindow::on_commitDataRequest() {
         if (settings->mw_size != news) settings->mw_size = news;
     }
     settings->splitter_state = ui->splitter->saveState().toBase64();
-
-    // Backstop only: this runs on a graceful exit, so it must never be the sole write.
-    if (settings->remember_enable && settings->started_id >= 0) settings->remember_id = settings->started_id;
-    settings->remember_system_proxy = settings->spmode_system_proxy;
-    settings->remember_tun = settings->spmode_vpn;
-
-    settings->Save();
-    qDebug() << "End of data save";
 }
 
-void MainWindow::prepare_exit(bool interactive)
-{
-    // Re-entry from a nested loop of the running teardown: mu_exit is not recursive, and the flag is set before any such loop.
-    if (Configs::dataManager->settingsRepo->prepare_exit) return;
-    qDebug() << "prepare for exit...";
-    mu_exit.lock();
-    if (Configs::dataManager->settingsRepo->prepare_exit)
-    {
-        qDebug() << "prepare exit had already succeeded, ignoring...";
-        mu_exit.unlock();
-        return;
-    }
-    Configs::dataManager->settingsRepo->prepare_exit = true;
-    LOG_INFO("prepare_exit started, tearing down proxy/tun/core");
-    // Before the waits below: their nested event loops would dispatch API requests mid-teardown.
-    RemoteApi::Server::instance()->shutdown();
-    // Unconditional: an uncheck may still have its clear queued.
-    m_connection->applySystemProxy(false, true);
-    RegisterHiddenMenuShortcuts(true);
-    RegisterHotkey(true);
-    on_commitDataRequest();
-    Scanner::ScanManager::instance()->StopAll(true);
-    Configs::dataManager->settingsRepo->noSave = true; // don't change Configs::dataManager->settingsRepo after this line
-    m_connection->stop({false, true, false, interactive});
-
-    m_coreSupervisor->shutdown();
-    HideWindow(this);
-    tray->hide();
-    // Only once the core is gone: until then the guard keeps blocking whatever would leak around the dying tunnel.
-    Sys::KillSwitch::instance()->shutdown();
-
-    mu_exit.unlock();
-    qDebug() << "prepare exit done!";
+void MainWindow::on_commitDataRequest() {
+    saveWindowState();
+    exitController()->persistSessionState();
 }
 
 void MainWindow::on_menu_exit_triggered() {
     // A teardown already running quits on its own; a second request would cut its nested waits short.
-    if (Configs::dataManager->settingsRepo->prepare_exit || m_exitInProgress) return;
-    m_exitInProgress = true;
+    if (Configs::dataManager->settingsRepo->prepare_exit || exitController()->exitInProgress()) return;
+    exitController()->setExitInProgress(true);
     // A request made during the teardown below may overwrite exit_reason.
     const auto reason = exit_reason;
     const bool unattended = m_exitUnattended;
@@ -179,7 +132,7 @@ void MainWindow::on_menu_exit_triggered() {
         const auto elevatedArguments = arguments + QStringList{QString("-wait_pid=%1").arg(QCoreApplication::applicationPid())};
         const bool launched = WinCommander::runProcessElevated(program, elevatedArguments, QApplication::applicationDirPath(), 1, false) == 0;
         if (!launched) {
-            m_exitInProgress = false;
+            exitController()->setExitInProgress(false);
             exit_reason = ExitReason::None;
             MW_show_log(tr("Restart as administrator was cancelled, Throne keeps running"));
             return;
@@ -188,7 +141,7 @@ void MainWindow::on_menu_exit_triggered() {
     }
 #endif
 
-    prepare_exit(!unattended);
+    Engine::host()->shutdown(!unattended);
     if (reason == ExitReason::RunUpdater) {
         QDir::setCurrent(QApplication::applicationDirPath());
 #ifdef Q_OS_WIN
@@ -207,7 +160,7 @@ void MainWindow::on_menu_exit_triggered() {
 }
 
 void MainWindow::request_unattended_exit(ExitReason reason) {
-    if (Configs::dataManager->settingsRepo->prepare_exit || m_exitInProgress) return;
+    if (Configs::dataManager->settingsRepo->prepare_exit || exitController()->exitInProgress()) return;
     m_exitUnattended = true;
     m_exitKeepTray = isHidden();
     exit_reason = reason;
@@ -217,25 +170,21 @@ void MainWindow::request_unattended_exit(ExitReason reason) {
 void MainWindow::toggle_system_proxy() {
     auto currentState = Configs::dataManager->settingsRepo->spmode_system_proxy;
     if (currentState) {
-        m_connection->setSystemProxy(false);
+        connection()->setSystemProxy(false);
     } else {
-        m_connection->setSystemProxy(true);
+        connection()->setSystemProxy(true);
     }
 }
 
 void MainWindow::toggle_tun() {
-    const auto state = m_connection->connectionState();
+    const auto state = connection()->connectionState();
     if (state == ConnectionState::Connecting || state == ConnectionState::Stopping) return;
-    m_connection->setTun(!Configs::dataManager->settingsRepo->spmode_vpn);
+    connection()->setTun(!Configs::dataManager->settingsRepo->spmode_vpn);
 }
 
 bool MainWindow::StopVPNProcess() {
-    m_coreSupervisor->killForPrivilegeChange();
+    supervisor()->killForPrivilegeChange();
     return true;
-}
-
-void MainWindow::RestartCore() {
-    m_coreSupervisor->resetCore();
 }
 
 void MainWindow::show_startstop_menu() {
@@ -257,7 +206,7 @@ void MainWindow::confirm_disable_kill_switch() {
     box->setDefaultButton(cancel);
     box->setEscapeButton(cancel);
     connect(box, &QMessageBox::finished, this, [this, box, disable] {
-        if (box->clickedButton() == disable) m_connection->disableKillSwitch();
+        if (box->clickedButton() == disable) connection()->disableKillSwitch();
     });
     box->open();
 }
@@ -333,42 +282,7 @@ bool isNewer(QString assetName) {
 
 constexpr auto dashboardDownloadURL = "https://github.com/SagerNet/sing-box-dashboard/archive/refs/heads/gh-pages.zip";
 
-bool copyOut(const QString &from, const QString &to) {
-    QFile::remove(to);
-    if (!QFile::copy(from, to)) return false;
-    // Resource files are read-only, and QFile::copy carries that onto the copy.
-    return QFile::setPermissions(to, QFileDevice::ReadOwner | QFileDevice::WriteOwner |
-                                     QFileDevice::ReadGroup | QFileDevice::ReadOther);
-}
-
-bool unpackBundledDashboard(const QDir &dest) {
-    if (!QFile::exists(":/dashboard/index.html")) return false;
-    const QDir bundle(":/dashboard");
-    QDirIterator it(bundle.path(), QDir::Files, QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        const auto source = it.next();
-        const auto target = dest.filePath(bundle.relativeFilePath(source));
-        if (!QDir().mkpath(QFileInfo(target).absolutePath()) || !copyOut(source, target)) return false;
-    }
-    return true;
-}
-
 } // namespace
-
-void MainWindow::SeedDashboard() {
-    QDir dashDir(Configs::apiDashboardDir);
-    if (!dashDir.exists() && !QDir().mkpath(Configs::apiDashboardDir)) return;
-    if (!QFile::exists(dashDir.filePath("index.html"))) unpackBundledDashboard(dashDir);
-    // Reinstalling replaces the whole directory, so this cannot be a one-time copy.
-    auto src = QFile(":/Throne/dashboard-bootstrap.html");
-    if (!src.open(QIODevice::ReadOnly)) return;
-    const auto data = src.readAll();
-    src.close();
-    if (auto dest = QFile(dashDir.filePath("throne.html")); dest.open(QIODevice::Truncate | QIODevice::WriteOnly)) {
-        dest.write(data);
-        dest.close();
-    }
-}
 
 void MainWindow::OpenDashboard() {
     const auto &settings = *Configs::dataManager->settingsRepo;
@@ -383,7 +297,7 @@ void MainWindow::OpenDashboard() {
     }
 
     const auto show = [this, port] {
-        SeedDashboard();
+        Engine::Dashboard::SeedApi();
         // Fragment, not query: browsers never send it to the server.
         QUrl url(QString("http://127.0.0.1:%1/dashboard/throne.html").arg(port));
         url.setFragment(QString("secret=%1&url=127.0.0.1:%2")
@@ -393,7 +307,7 @@ void MainWindow::OpenDashboard() {
         QDesktopServices::openUrl(url);
     };
 
-    SeedDashboard();
+    Engine::Dashboard::SeedApi();
     if (QFile::exists(QDir(Configs::apiDashboardDir).filePath("index.html"))) {
         show();
         return;

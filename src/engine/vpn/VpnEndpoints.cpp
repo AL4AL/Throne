@@ -3,6 +3,7 @@
 #include "include/api/RPC.h"
 #include "include/database/DatabaseManager.h"
 #include "include/database/ProfilesRepo.h"
+#include "include/database/SettingsRepo.h"
 #include "include/engine/EngineTr.h"
 
 #include <QMutex>
@@ -122,5 +123,25 @@ namespace Stats {
                                    : MainWindowTr::tr("Tunnel error") + ": " + error;
         }
         return state;
+    }
+
+    QString LiveVpnStateText(bool *connected) {
+        if (connected != nullptr) *connected = false;
+        const int startedID = Configs::dataManager->settingsRepo->started_id;
+        if (startedID < 0) return {};
+        if (VpnExitEndpoint(Configs::dataManager->profilesRepo->GetProfile(startedID)) == nullptr) return {};
+
+        bool ok = false;
+        const auto status = API::defaultClient->QueryVPNStatus(&ok, {"proxy"});
+        if (!ok || status.results.empty()) return {};
+        const auto &res = status.results.front();
+        if (connected != nullptr) *connected = res.connected.value();
+        return VpnExitStateText(QString::fromStdString(res.state.value()), QString::fromStdString(res.error.value()));
+    }
+
+    QString LiveVpnConnectOkText() {
+        bool connected = false;
+        const auto text = LiveVpnStateText(&connected);
+        return connected ? text : QString();
     }
 } // namespace Stats

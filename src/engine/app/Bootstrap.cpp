@@ -4,11 +4,34 @@
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDateTime>
+#include <QDeadlineTimer>
 #include <QDirIterator>
 #include <QFile>
 #include <QStandardPaths>
+#include <QThread>
 
+#include "include/engine/app/DataDirLock.h"
+#include "include/engine/app/InstanceServer.h"
+#include "include/global/Configs.hpp"
 #include "include/global/Logger.hpp"
+#include "include/stats/traffic/TrafficStatsManager.hpp"
+
+#ifdef Q_OS_WIN
+#include "include/sys/windows/MiniDump.h"
+
+#include <windows.h>
+// <windows.h> defines SetPort, which under unity builds clobbers Configs::outbound::SetPort.
+#undef SetPort
+#endif
+#ifdef Q_OS_UNIX
+#include <QSocketNotifier>
+
+#include <cerrno>
+#include <fcntl.h>
+#include <signal.h>
+#include <unistd.h>
+#endif
 
 #define LOCAL_SERVER_PREFIX "throne-"
 
@@ -79,6 +102,11 @@ namespace Engine::Bootstrap {
         return Mode::Gui;
     }
 
+    void SetSoftwareNames() {
+        software_name = "Throne";
+        software_core_name = "sing-box";
+    }
+
     DataDir ResolveDataDir(const QStringList &arguments, const QDir &relativeBase) {
         DataDir res;
         res.wd = QDir(QCoreApplication::applicationDirPath());
@@ -133,4 +161,178 @@ namespace Engine::Bootstrap {
             }
         }
     }
+
+    RelaunchParent::RelaunchParent(QStringList &arguments) {
+        const QString prefix = "-wait_pid=";
+        for (qsizetype i = arguments.size() - 1; i >= 1; i--) {
+            if (arguments.at(i).startsWith(prefix)) pid = arguments.takeAt(i).mid(prefix.size()).toLongLong();
+        }
+#ifdef Q_OS_WIN
+        if (pid > 0) {
+            handle = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
+            if (handle != nullptr) WaitForSingleObject(handle, 30000);
+        }
+#endif
+    }
+
+    RelaunchParent::~RelaunchParent() {
+#ifdef Q_OS_WIN
+        if (handle != nullptr) CloseHandle(handle);
+#endif
+    }
+
+    bool RelaunchParent::gone() const {
+        if (pid <= 0) return true;
+#ifdef Q_OS_WIN
+        return handle == nullptr || WaitForSingleObject(handle, 0) == WAIT_OBJECT_0;
+#else
+        return ::kill(static_cast<pid_t>(pid), 0) == -1 && errno == ESRCH;
+#endif
+    }
+
+    void WarnDroppedPayload(const QStringList &payload) {
+        if (!payload.isEmpty()) LOG_WARN("dropped the launch payload: " + payload.join(' '));
+    }
+
+    Claim ClaimDataDir(DataDirLock &lock, const DataDir &dataDir, const QString &serverName, const QString &lockMode,
+                       const QStringList &payload, const RelaunchParent &relaunchParent) {
+        const QString &configDir = dataDir.configDir;
+        // For up to 60 s a restarted instance never hands off: the owner is its exiting parent, which still answers on the socket.
+        const QDeadlineTimer relaunchDeadline(relaunchParent.relaunched() ? 60000 : 0);
+        QDeadlineTimer handOffDeadline(QDeadlineTimer::Forever);
+        while (true) {
+            const auto lockResult = lock.tryAcquire(configDir, lockMode);
+            if (lockResult == DataDirLock::Result::Failed) {
+                LOG_WARN("running without the data dir lock: " + lock.errorString());
+                break;
+            }
+            if (lockResult == DataDirLock::Result::Acquired) {
+                if (!lock.errorString().isEmpty()) LOG_WARN(lock.errorString());
+                break;
+            }
+            if (!relaunchDeadline.hasExpired() && !relaunchParent.gone()) {
+                QThread::msleep(100);
+                continue;
+            }
+            if (handOffDeadline.isForever()) {
+                if (relaunchParent.relaunched() && !relaunchParent.gone()) {
+                    LOG_WARN(QString("the data dir is still held after waiting for the restarting PID %1").arg(relaunchParent.pid));
+                }
+                handOffDeadline.setRemainingTime(10000);
+            }
+            // The owner may still be starting up, or exiting and about to release the lock.
+            if (InstanceServer::HandOff(serverName, payload)) return {ClaimOutcome::HandedOff};
+            if (handOffDeadline.hasExpired()) {
+                const auto owner = DataDirLock::ReadOwner(configDir);
+                const auto pid = owner.value("pid").toInteger();
+                LOG_WARN(QString("the data dir is held by PID %1, which does not answer on %2").arg(QString::number(pid), serverName));
+                WarnDroppedPayload(payload);
+                return {ClaimOutcome::HeldByOther, pid};
+            }
+            QThread::msleep(100);
+        }
+        // A Throne older than the lock only answers on its socket; a restarted one would only find its exiting parent there.
+        if (relaunchParent.gone() && InstanceServer::HandOff(serverName, payload)) return {ClaimOutcome::HandedOff};
+        return {};
+    }
+
+    void OpenDataDir(const DataDir &dataDir, const QStringList &arguments) {
+        const bool useAppdata = dataDir.useAppdata;
+        const QString &appdataDir = dataDir.appdataDir;
+        const QString &configDir = dataDir.configDir;
+
+        QDir::setCurrent(configDir);
+        QDir("temp").removeRecursively();
+        AdoptLegacyGeoAssets(dataDir);
+
+        appStartEpoch = QDateTime::currentSecsSinceEpoch();
+
+        Configs::initDB(QString(QDir::currentPath() + QDir::separator() + "throne.db").toStdString());
+
+        Logging::SetLevel(Logging::LevelFromString(Configs::dataManager->settingsRepo->log_file_level));
+
+        Stats::trafficStatsManager->Init();
+
+        Configs::dataManager->settingsRepo->argv = arguments;
+        if (Configs::dataManager->settingsRepo->argv.contains("-many")) Configs::dataManager->settingsRepo->flag_many = true;
+        if (Configs::dataManager->settingsRepo->argv.contains("-tray")) Configs::dataManager->settingsRepo->flag_tray = true;
+        if (Configs::dataManager->settingsRepo->argv.contains("-debug")) Configs::dataManager->settingsRepo->flag_debug = true;
+        if (Configs::dataManager->settingsRepo->argv.contains("-flag_restart_tun_on")) Configs::dataManager->settingsRepo->flag_restart_tun_on = true;
+        Configs::dataManager->settingsRepo->flag_use_appdata = useAppdata;
+        if(useAppdata && !appdataDir.isEmpty()) Configs::dataManager->settingsRepo->appdataDir = appdataDir;
+#ifdef NKR_CPP_DEBUG
+        Configs::dataManager->settingsRepo->flag_debug = true;
+#endif
+    }
+
+    void PrepareRuntime() {
+#ifdef Q_OS_LINUX
+        QCoreApplication::addLibraryPath(QCoreApplication::applicationDirPath() + "/usr/plugins");
+#endif
+
+        DS_cores = new QThread;
+        DS_cores->start();
+    }
+
+    void StartLogging(const DataDir &dataDir) {
+        Logging::Init(dataDir.configDir);
+        LOG_INFO(QString("appdata mode: %1").arg(dataDir.useAppdata ? "yes" : "no"));
+#ifdef Q_OS_WIN
+        Windows_SetCrashDumpPath();
+        Windows_ConfigureWER();
+#endif
+    }
+
+    bool ExitInProgress() {
+        return Configs::dataManager != nullptr && Configs::dataManager->settingsRepo->prepare_exit;
+    }
+
+#ifdef Q_OS_UNIX
+    namespace {
+        int bootstrapSignalPipe[2] = {-1, -1};
+
+        // Async-signal-safe: only the self-pipe write() is allowed here; teardown runs from the notifier on the main thread.
+        void bootstrapPosixSignalHandler(int signum) {
+            const auto byte = static_cast<char>(signum);
+            [[maybe_unused]] const ssize_t written = ::write(bootstrapSignalPipe[1], &byte, 1);
+        }
+    } // namespace
+
+    // Signals caught from here on wait in the pipe until ArmTerminationHandlers().
+    bool InstallTerminationHandlers(void (*directFallback)(int)) {
+        if (::pipe(bootstrapSignalPipe) != 0) {
+            bootstrapSignalPipe[0] = bootstrapSignalPipe[1] = -1;
+            if (directFallback != nullptr) {
+                signal(SIGTERM, directFallback);
+                signal(SIGINT, directFallback);
+            }
+            return false;
+        }
+        for (const int fd : bootstrapSignalPipe) {
+            ::fcntl(fd, F_SETFD, ::fcntl(fd, F_GETFD) | FD_CLOEXEC);
+            // Non-blocking: a full pipe must fail the write, never block in signal context.
+            ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK);
+        }
+
+        struct sigaction sa{};
+        sa.sa_handler = bootstrapPosixSignalHandler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_RESTART;
+        sigaction(SIGTERM, &sa, nullptr);
+        sigaction(SIGINT, &sa, nullptr);
+        return true;
+    }
+
+    void ArmTerminationHandlers(std::function<void()> onSignal) {
+        if (bootstrapSignalPipe[0] < 0) return;
+        auto *notifier = new QSocketNotifier(bootstrapSignalPipe[0], QSocketNotifier::Read, QCoreApplication::instance());
+        QObject::connect(notifier, &QSocketNotifier::activated, QCoreApplication::instance(), [notifier, onSignal = std::move(onSignal)] {
+            char drain[16];
+            while (::read(bootstrapSignalPipe[0], drain, sizeof(drain)) > 0) {}
+            if (ExitInProgress()) return;
+            notifier->setEnabled(false);
+            onSignal();
+        });
+    }
+#endif
 } // namespace Engine::Bootstrap

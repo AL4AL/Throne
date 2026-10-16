@@ -459,7 +459,7 @@ MainWindow::RuleToggle MainWindow::toggleRuleInCurrentRoute(const QString& rawRu
         return fail(tr("Failed to save routing rule: %1").arg(rawRule));
 
     MW_show_log(log);
-    m_connection->noteRestartNeeded(Engine::RestartReason::Routing);
+    connection()->noteRestartNeeded(Engine::RestartReason::Routing);
     return result;
 }
 

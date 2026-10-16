@@ -9,7 +9,8 @@
 #include <QPointer>
 
 #include "include/database/GroupsRepo.h"
-#include "include/ui/mainwindow.h"
+#include "include/engine/EngineHost.h"
+#include "include/engine/connection/ConnectionManager.h"
 #include "include/ui/stats/dialog_endpoint_details.h"
 #include "include/ui/widget/SubscriptionInfoCard.hpp"
 
@@ -123,8 +124,8 @@ void GroupItem::on_remove_clicked() {
     if (QMessageBox::question(manage, tr("Confirmation"), tr("Remove %1?").arg(ent->name)) != QMessageBox::StandardButton::Yes || self == nullptr) {
         return;
     }
-    if (const auto running = GetMainWindow()->runningSnapshot(); running != nullptr && running->gid == id) {
-        GetMainWindow()->profile_stop(false, true, false);
+    if (const auto running = Engine::host()->connection()->runningSnapshot(); running != nullptr && running->gid == id) {
+        Engine::host()->connection()->stop({.block = true});
         if (self == nullptr) return;
     }
     if (const auto error = manage->deleteGroup(id)) {

@@ -11,7 +11,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLocalSocket>
 #include <QRegularExpression>
 #include <QScopeGuard>
 
@@ -23,6 +22,7 @@
 #include "include/database/RoutesRepo.h"
 #include "include/engine/app/Bootstrap.h"
 #include "include/engine/app/DataDirLock.h"
+#include "include/engine/app/InstanceServer.h"
 #include "include/global/Configs.hpp"
 #include "include/global/Logger.hpp"
 #ifdef Q_OS_LINUX
@@ -343,13 +343,9 @@ namespace Engine {
                 break;
         }
         // A Throne older than the lock, or a failed lock, leaves the instance socket as the only sign of a live owner.
-        {
-            QLocalSocket probe;
-            probe.connectToServer(Bootstrap::InstanceServerName(dataDir.wd));
-            if (probe.waitForConnected(250)) {
-                PrintError(QString("-dump-configs: a running Throne owns %1").arg(dataDir.wd.absolutePath()));
-                return 3;
-            }
+        if (InstanceServer::HandOff(Bootstrap::InstanceServerName(dataDir.wd), {})) {
+            PrintError(QString("-dump-configs: a running Throne owns %1").arg(dataDir.wd.absolutePath()));
+            return 3;
         }
 
         if (!QDir().mkpath(outDir.absolutePath())) {

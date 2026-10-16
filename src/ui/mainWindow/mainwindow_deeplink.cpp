@@ -17,7 +17,9 @@
 #include "include/configs/sub/RouteUpdater.hpp"
 #include "include/database/GroupsRepo.h"
 #include "include/database/RoutesRepo.h"
+#include "include/engine/EngineHost.h"
 #include "include/engine/ThreadCheck.h"
+#include "include/engine/app/ExitController.h"
 #include "include/engine/connection/ConnectionManager.h"
 #include "include/global/Logger.hpp"
 #include "include/global/PeriodicRunner.hpp"
@@ -284,51 +286,6 @@ void MainWindow::import_text(const QString &text) {
     Subscription::updater()->ImportText(content);
 }
 
-void MainWindow::applySettingsChange(const QStringList &flags, bool interactive) {
-    ENGINE_CHECK_MAIN_THREAD();
-    const auto changed = [&](const QString &flag) { return flags.contains(flag); };
-    auto &settings = Configs::dataManager->settingsRepo;
-
-    if (changed(MwArg::ChoosePort)) {
-        settings->inbound_socks_port = MkPort(settings->inbound_address);
-        if (settings->spmode_system_proxy) {
-            const ModeChange change{.interactive = interactive};
-            m_connection->setSystemProxy(false, change);
-            m_connection->setSystemProxy(true, change);
-        }
-    }
-    if (changed(MwArg::DisableAdmin)) {
-        AutoRun_FixTaskIfNeeded();
-    }
-    auto suggestRestartProxy = settings->Save();
-    Throne::PeriodicRunner::instance()->CheckNow();
-    if (changed(MwArg::KillSwitch) || changed(MwArg::Vpn)) Sys::KillSwitch::instance()->apply();
-    if (changed(MwArg::RemoteApi)) RemoteApi::Server::instance()->apply(RemoteApi::ConfigFromSettings());
-    if (changed(MwArg::Route)) {
-        settings->Save();
-        suggestRestartProxy = true;
-    }
-    if (changed(MwArg::NeedRestart)) {
-        suggestRestartProxy = false;
-    }
-    if (changed(MwArg::Vpn) && settings->spmode_vpn) {
-        if (interactive) policy()->settingsNeedTunRestart();
-        else MW_show_log(tr("Tun Settings changed") + ": " + tr("Restart Tun to take effect."));
-    }
-    if (changed(MwArg::ChoosePort) || suggestRestartProxy) {
-        m_connection->noteRestartNeeded(changed(MwArg::Route) ? Engine::RestartReason::Routing : Engine::RestartReason::Settings);
-    }
-    refresh_status();
-    if (changed(MwArg::NeedRestart)) {
-        if (!interactive) {
-            MW_show_log(tr("Settings changed") + ": " + tr("Restart the program to take effect."));
-        } else if (policy()->confirmRestartProgram()) {
-            this->exit_reason = ExitReason::Restart;
-            on_menu_exit_triggered();
-        }
-    }
-}
-
 void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
     ENGINE_CHECK_MAIN_THREAD();
     const auto changed = [&](const QString &flag) { return args.contains(flag); };
@@ -366,12 +323,11 @@ void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
             }
             refresh_proxy_list({}, true);
         }
-        applySettingsChange(args, true);
+        Engine::host()->applySettingsChange(args, true);
         break;
     }
     case MwMessage::RestartProgram:
-        this->exit_reason = ExitReason::Restart;
-        on_menu_exit_triggered();
+        exitController()->requestExit(ExitReason::Restart, false);
         break;
     case MwMessage::Raise:
         ActivateWindow(this);
@@ -381,27 +337,12 @@ void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
         break;
     case MwMessage::ProfileChanged:
         refresh_proxy_list({}, true);
-        if (changed(MwArg::RestartProxy)) m_connection->noteRestartNeeded(Engine::RestartReason::Profile);
+        if (changed(MwArg::RestartProxy)) connection()->noteRestartNeeded(Engine::RestartReason::Profile);
         break;
     case MwMessage::GroupsChanged:
         refresh_groups();
         profilesTableModel->invalidateAddresses();
-        if (changed(MwArg::RestartProxy)) m_connection->noteRestartNeeded(Engine::RestartReason::Group);
-        break;
-    case MwMessage::SubscriptionFinished:
-        refresh_proxy_list({}, true);
-        if (!changed(MwArg::Quiet)) {
-            // The job's own count: the global may already belong to the next job.
-            bool counted = false;
-            const int count = args.value(0).toInt(&counted);
-            MW_show_log(tr("Imported %1 profile(s)").arg(counted ? count : settings->imported_count));
-        }
-        break;
-    case MwMessage::SubscriptionNewGroup:
-        refresh_groups();
-        break;
-    case MwMessage::GroupOrderChanged:
-        if (args.contains(Int2String(settings->current_group))) refresh_proxy_list({}, true);
+        if (changed(MwArg::RestartProxy)) connection()->noteRestartNeeded(Engine::RestartReason::Group);
         break;
     }
 }

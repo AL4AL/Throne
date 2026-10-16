@@ -58,9 +58,6 @@ enum class MwMessage {
     UpdateShortcuts,
     ProfileChanged,       // arg MwArg::RestartProxy when the saved profile is part of the running config
     GroupsChanged,        // arg MwArg::RestartProxy when the edited group changed what a running profile dials
-    SubscriptionFinished, // args[0] may carry the job's imported count; MwArg::Quiet skips the import-count line
-    SubscriptionNewGroup,
-    GroupOrderChanged,    // args: ids of the groups a kept sort reordered
 };
 
 // String tokens carried in a MwMessage's argument list.
@@ -80,8 +77,6 @@ namespace MwArg {
     inline const QString RemoteApi    = QStringLiteral("remoteApi");
     // ProfileChanged arg.
     inline const QString RestartProxy = QStringLiteral("restartProxy");
-    // SubscriptionFinished arg.
-    inline const QString Quiet        = QStringLiteral("quiet");
 }
 
 // Thread-safe; dropped while no sink is installed.

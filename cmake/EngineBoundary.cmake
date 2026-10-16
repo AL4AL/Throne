@@ -6,6 +6,7 @@ if (NOT DEFINED ROOT OR ROOT STREQUAL "")
     get_filename_component(ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 endif ()
 file(TO_CMAKE_PATH "${ROOT}" ROOT)
+get_filename_component(ROOT "${ROOT}" ABSOLUTE)
 
 # E5 ratchet: files outside the UI that still include include/ui/. Entries only ever leave this list.
 set(UI_INCLUDE_ALLOWLIST

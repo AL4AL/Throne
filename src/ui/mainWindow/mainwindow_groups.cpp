@@ -244,10 +244,10 @@ void MainWindow::show_group_tab_menu(const QPoint &p) {
     }
     if (clickedGroup != nullptr) {
         connect(menu.addAction(tr("Url Test selected Group")), &QAction::triggered, this, [=,this]{
-            if (const auto group = Configs::dataManager->groupsRepo->GetGroup(clickedGid)) testRunner->runUrlTests(group->Profiles());
+            if (const auto group = Configs::dataManager->groupsRepo->GetGroup(clickedGid)) tests()->runUrlTests(group->Profiles());
         });
         connect(menu.addAction(tr("Speed Test selected Group")), &QAction::triggered, this, [=,this]{
-            if (const auto group = Configs::dataManager->groupsRepo->GetGroup(clickedGid)) testRunner->runSpeedTests(group->Profiles());
+            if (const auto group = Configs::dataManager->groupsRepo->GetGroup(clickedGid)) tests()->runSpeedTests(group->Profiles());
         });
         // Clean up acts on the current group; setCurrentIndex above already switched to the clicked one.
         menu.addSeparator();

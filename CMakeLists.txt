@@ -215,7 +215,6 @@ set(PROJECT_SOURCES
         src/ui/mainWindow/mainwindow_hotkeys.cpp
         src/ui/mainWindow/mainwindow_profile_lifecycle.cpp
         src/ui/mainWindow/mainwindow_scanner.cpp
-        include/ui/mainWindow/MainWindowEngineControl.h
         src/ui/mainWindow/mainwindow_engine_control.cpp
         src/ui/mainWindow/mainwindow_policy.cpp
         include/ui/mainWindow/MainWindowInternal.h
@@ -641,6 +640,8 @@ set(PROJECT_SOURCES
         src/configs/sub/warp.cpp
         include/global/Common.h
         src/global/Common.cpp
+        include/ui/app/GuiStartup.h
+        src/ui/app/GuiStartup.cpp
 )
 
 if (NOT APPLE AND Qt6_VERSION VERSION_GREATER_EQUAL 6.9.0)
@@ -718,6 +719,14 @@ set(ENGINE_SOURCES
         src/engine/connection/ConnectionModes.cpp
         include/engine/vpn/VpnAuthController.h
         src/engine/vpn/VpnAuthController.cpp
+        include/engine/services/Dashboard.h
+        src/engine/services/Dashboard.cpp
+        include/engine/app/InstanceServer.h
+        src/engine/app/InstanceServer.cpp
+        include/engine/app/ExitController.h
+        src/engine/app/ExitController.cpp
+        include/engine/EngineHost.h
+        src/engine/EngineHost.cpp
         # Last: its <windows.h> macros must not reach a later TU of the same MSVC unity batch.
         include/engine/supervisor/CoreSupervisor.h
         src/engine/supervisor/CoreSupervisor.cpp

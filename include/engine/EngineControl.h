@@ -15,7 +15,7 @@ namespace Configs {
 }
 
 namespace Engine {
-    // What the Throne API drives; MainWindowEngineControl relays it to the engine. Main thread only unless noted.
+    // What the Throne API drives; EngineHost implements it. Main thread only unless noted.
     class EngineControl : public QObject {
         Q_OBJECT
 

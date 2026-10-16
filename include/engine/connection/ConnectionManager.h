@@ -34,7 +34,7 @@ namespace Engine {
         // Before the event loop runs; all three outlive every start and stop.
         void attach(TestRunner *tests, AutoSelectorController *autoSelector, VpnAuthController *vpnAuth);
 
-        // At the window's old connect point for now; Checkpoint C moves it before KillSwitch::apply().
+        // Once, before the first KillSwitch::apply(), so the state changes apply() emits reach the handler.
         void attachKillSwitch();
 
         // startFinished fires once per request unless policy()->pickInsteadOfStart() claimed it. profileId < 0: NotFound.
@@ -83,7 +83,7 @@ namespace Engine {
         bool restartPending() const;
 
     signals:
-        // API; MainWindowEngineControl relays them with Qt::DirectConnection. The types are unregistered.
+        // API; EngineHost relays them with Qt::DirectConnection. The types are unregistered.
         void startFinished(quint64 serial, int profileId, Engine::StartOutcome outcome, const QString &error);
 
         // After mu_stopping is released.
