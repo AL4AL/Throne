@@ -12,6 +12,7 @@
 #include <functional>
 #include <utility>
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -115,6 +116,7 @@ namespace Engine {
     void CoreSupervisor::shutdown() {
         // First: a restart firing inside the nested wait below would spawn a core during the exit.
         setState(CoreState::ShuttingDown);
+        m_probing = false;
         m_restartTimer->stop();
         m_connectTimer->stop();
         runOnThread([this] {
@@ -189,6 +191,14 @@ namespace Engine {
         ENGINE_CHECK_MAIN_THREAD();
         m_startWhenUp = -1;
         Configs::dataManager->settingsRepo->started_id = Configs::NoProfileId;
+    }
+
+    bool CoreSupervisor::awaitingCoreStarted() const {
+        return m_probing;
+    }
+
+    int CoreSupervisor::startWhenUp() const {
+        return m_startWhenUp;
     }
 
     bool CoreSupervisor::canStartCore() const {
@@ -280,13 +290,56 @@ namespace Engine {
         if (gen > m_acceptedGen) {
             m_acceptedGen = gen;
             m_connectedAt.start();
-            m_startFailures = 0;
         }
         m_connectTimer->stop();
         setState(CoreState::Connected);
-        const int profileId = std::exchange(m_startWhenUp, -1);
+#ifdef Q_OS_WIN
+        // Local and quick, and it writes windows_set_admin, so it stays here on the main thread.
         LOG_INFO(QString("elevated: %1").arg(Configs::IsAdmin(true) ? "yes" : "no"));
-        emit coreStarted(profileId);
+        emitCoreStarted();
+#else
+        m_probing = true;
+        startPrivilegeProbe(m_acceptedGen);
+#endif
+    }
+
+    void CoreSupervisor::startPrivilegeProbe(quint64 gen, int attempt) {
+        const QPointer<CoreSupervisor> self(this);
+        runOnNewThread([self, gen, attempt] {
+            bool ok = false;
+            const bool privileged = API::defaultClient->IsPrivileged(&ok, kPrivilegeProbeTimeoutMs);
+            // Posted to the application object, not to self: QPointer is only safe to dereference on the main thread.
+            QMetaObject::invokeMethod(QCoreApplication::instance(), [self, gen, ok, privileged, attempt] {
+                if (self) self->onPrivilegeProbed(gen, ok, privileged, attempt);
+            }, Qt::QueuedConnection);
+        });
+    }
+
+    void CoreSupervisor::onPrivilegeProbed(quint64 gen, bool ok, bool privileged, int attempt) {
+        ENGINE_CHECK_MAIN_THREAD();
+        if ((attempt == 0 && !m_probing) || gen != m_acceptedGen || m_state != CoreState::Connected || exiting()) return;
+        // A dropped channel means the core is exiting (it never redials); its exit report settles the pending start.
+        if (!ok && !API::defaultClient->IsConnected()) return;
+        // On failure the old answer stays cached, as IsAdmin(true) keeps it.
+        if (ok) Configs::SetKnownAdmin(privileged);
+        QString elevated = QString("elevated: %1").arg(ok && privileged ? "yes" : "no");
+        if (attempt > 0) elevated += QString(" (retry %1)").arg(attempt);
+        LOG_INFO(elevated);
+        if (!ok && attempt < kPrivilegeProbeRetries) {
+            QTimer::singleShot(kPrivilegeProbeRetryMs, this, [this, gen, attempt] {
+                if (gen == m_acceptedGen && m_state == CoreState::Connected && !exiting()) startPrivilegeProbe(gen, attempt + 1);
+            });
+        }
+        if (attempt > 0) return;
+        // Before the emit: a start from a coreStarted slot would otherwise wait for a second coreStarted.
+        m_probing = false;
+        emitCoreStarted();
+    }
+
+    void CoreSupervisor::emitCoreStarted() {
+        // Reset here rather than at the accept, so a core that dies during the probe counts as never connected.
+        m_startFailures = 0;
+        emit coreStarted(std::exchange(m_startWhenUp, -1));
     }
 
     void CoreSupervisor::setupRpc(QLocalSocket *socket) {
@@ -395,6 +448,9 @@ namespace Engine {
         // stateChanged and errorOccurred can both report one exit, in a platform-dependent order.
         if (gen <= m_handledExitGen) return;
         m_handledExitGen = gen;
+        // This core never sent coreStarted, so it took no start and is treated as one that never connected.
+        const bool wasProbing = m_probing && gen == m_acceptedGen;
+        if (wasProbing) m_probing = false;
         if (exiting()) return;
         m_connectTimer->stop();
 
@@ -402,13 +458,14 @@ namespace Engine {
         if (m_expectedExitGen.load() == gen) {
             m_failures = 0;
             m_startFailures = 0;
-            m_startWhenUp = settings->started_id;
+            // A start still waiting for the probing core carries over to the restarted one.
+            if (!wasProbing || m_startWhenUp < 0) m_startWhenUp = settings->started_id;
             MW_show_log("[Warn] " + QObject::tr("Restarting the core ..."));
             scheduleRestart(kIntentRestartDelayMs);
             return;
         }
 
-        const bool wasConnected = !failedToStart && gen == m_acceptedGen;
+        const bool wasConnected = !failedToStart && gen == m_acceptedGen && !wasProbing;
         if (wasConnected && m_connectedAt.isValid() && m_connectedAt.elapsed() >= kStableMs) m_failures = 0;
         ++m_failures;
         if (!wasConnected) ++m_startFailures;
@@ -469,6 +526,7 @@ namespace Engine {
     }
 
     void CoreSupervisor::beginRestart() {
+        m_probing = false;
         m_restartTimer->stop();
         m_connectTimer->stop();
         m_failures = 0;

@@ -567,12 +567,12 @@ namespace API {
         }
     }
 
-    bool Client::IsPrivileged(bool* rpcOK) const
+    bool Client::IsPrivileged(bool* rpcOK, int timeoutMs) const
     {
         libcore::EmptyReq request;
         libcore::IsPrivilegedResponse reply;
         std::vector<uint8_t> resp;
-        auto status = channel->Call("IsPrivileged", spb::pb::serialize<std::string>(request), resp);
+        auto status = channel->Call("IsPrivileged", spb::pb::serialize<std::string>(request), resp, timeoutMs);
 
         if (status == LocalSocketChannel::CallOK && tryDeserialize(resp, reply))
         {

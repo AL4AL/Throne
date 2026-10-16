@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QList>
+#include <QMap>
 #include <QPair>
 #include <QString>
 
@@ -26,4 +27,20 @@ struct VpnAuthChallenge {
     bool echo = false;
     qint64 deadline = 0;
     QList<VpnAuthField> fields;
+};
+
+// What a person or the OTP auto-answer sends back; an empty answer acknowledges the challenge.
+struct VpnAuthAnswer {
+    QString username;
+    QString password;
+    QString secret;
+    QMap<QString, QString> formValues;
+};
+
+struct VpnEndpointState {
+    QString tag;
+    QString state;
+    QString error;
+    bool connected = false;
+    bool authFailed = false;
 };

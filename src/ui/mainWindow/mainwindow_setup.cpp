@@ -16,9 +16,11 @@
 #include "include/engine/EngineEvents.h"
 #include "include/engine/Lifecycle.h"
 #include "include/engine/ThreadCheck.h"
+#include "include/engine/connection/ConnectionManager.h"
 #include "include/engine/services/AssetUpdates.h"
 #include "include/engine/services/StatsService.h"
 #include "include/engine/supervisor/CoreSupervisor.h"
+#include "include/engine/vpn/VpnAuthController.h"
 #include "include/global/PeriodicRunner.hpp"
 #include "include/global/Logger.hpp"
 #include "include/scanner/IpListUpdater.h"
@@ -84,7 +86,6 @@ static bool themeUsesDarkLog(const QString &theme) {
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
     mainwindow = this;
-    m_engineControl = new MainWindowEngineControl(this);
     m_stats = new Engine::StatsService(this);
     connect(m_stats, &Engine::StatsService::trafficLinesChanged, this, &MainWindow::set_traffic_lines);
     connect(m_stats, &Engine::StatsService::trafficSampled, this, [this](const Stats::TrafficSample &s) {
@@ -96,8 +97,18 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(m_stats, &Engine::StatsService::trafficStopped, this, [this] { refresh_status("STOP"); });
     connect(m_stats, &Engine::StatsService::connectionsUpdated, this, &MainWindow::UpdateConnectionList);
     m_coreSupervisor = new Engine::CoreSupervisor(this);
-    connect(m_coreSupervisor, &Engine::CoreSupervisor::coreStarted, this, &MainWindow::on_core_started);
-    connect(m_coreSupervisor, &Engine::CoreSupervisor::coreGaveUp, this, &MainWindow::on_core_gave_up);
+    m_connection = new Engine::ConnectionManager(policy(), m_coreSupervisor, m_stats, this);
+    // After the connection manager: its constructor connects the manager's signals.
+    m_engineControl = new MainWindowEngineControl(this, m_connection);
+    m_vpnAuth = new Engine::VpnAuthController(policy(), m_engineControl, this);
+    connect(m_connection, &Engine::ConnectionManager::statusChanged, this, [this] { refresh_status(); });
+    connect(m_connection, &Engine::ConnectionManager::busyChanged, this, &MainWindow::refresh_startstop_button);
+    connect(m_connection, &Engine::ConnectionManager::profileRowsChanged, this, [this](const QList<int> &ids) { refresh_proxy_list(ids); });
+    connect(m_connection, &Engine::ConnectionManager::runMarker, this, &MainWindow::addRunMarker);
+    connect(m_connection, &Engine::ConnectionManager::restartReasonsChanged, this, &MainWindow::showRestartReasons);
+    connect(m_connection, &Engine::ConnectionManager::systemProxyRefused, this, [this] { ui->checkBox_SystemProxy->setChecked(false); });
+    connect(m_vpnAuth, &Engine::VpnAuthController::endpointStatusChanged, this, &MainWindow::showVpnEndpointStatus);
+    connect(m_vpnAuth, &Engine::VpnAuthController::exitStateChanged, this, [this] { refresh_status(); });
     setAcceptDrops(true);
     SetDialogMessageSink([=,this](MwMessage cmd, const QStringList &args) {
         runOnUiThread([=,this]
@@ -156,9 +167,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         refresh_status();
         syncSettingsMirrors();
     });
-    Engine::Lifecycle::SetStopHandler([this](bool crash, bool block, bool manual, bool interactive) { profile_stop(crash, block, manual, interactive); });
-    testRunner = std::make_unique<Engine::TestRunner>(policy(), this, [this] { return runningSnapshot(); });
+    Engine::Lifecycle::SetStopHandler([c = m_connection](bool crash, bool block, bool manual, bool interactive) { c->stop({crash, block, manual, interactive}); });
+    testRunner = std::make_unique<Engine::TestRunner>(policy(), this, [c = m_connection] { return c->runningSnapshot(); });
     m_autoSelector = std::make_unique<Engine::AutoSelectorController>(engineControl(), testRunner.get());
+    m_connection->attach(testRunner.get(), m_autoSelector.get(), m_vpnAuth);
     // In this order: the traffic and connection loops spawn before the selector monitor, as before.
     connect(m_coreSupervisor, &Engine::CoreSupervisor::rpcConnected, m_stats, &Engine::StatsService::startLoops);
     connect(m_coreSupervisor, &Engine::CoreSupervisor::rpcConnected, m_autoSelector.get(), &Engine::AutoSelectorController::startMonitorLoop);
@@ -178,8 +190,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     setActionsData();
     loadShortcuts();
-
-    last_running_profile_id = Configs::dataManager->settingsRepo->remember_id;
 
     if (!Configs::dataManager->settingsRepo->mainWindowGeometry.isEmpty()) {
         auto geo = DecodeB64IfValid(Configs::dataManager->settingsRepo->mainWindowGeometry);
@@ -702,18 +712,18 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         ui->actionAllow_LAN->setChecked(checked);
         MW_dialog_message(MwMessage::UpdateSettings, {});
     });
-    connect(ui->checkBox_VPN, &QCheckBox::clicked, this, [=,this](bool checked) { set_spmode_vpn(checked); });
-    connect(ui->checkBox_SystemProxy, &QCheckBox::clicked, this, [=,this](bool checked) { set_spmode_system_proxy(checked); });
+    connect(ui->checkBox_VPN, &QCheckBox::clicked, this, [=,this](bool checked) { m_connection->setTun(checked); });
+    connect(ui->checkBox_SystemProxy, &QCheckBox::clicked, this, [=,this](bool checked) { m_connection->setSystemProxy(checked); });
     connect(ui->menu_spmode, &QMenu::aboutToShow, this, [=,this]() {
         ui->menu_spmode_disabled->setChecked(!(Configs::dataManager->settingsRepo->spmode_system_proxy || Configs::dataManager->settingsRepo->spmode_vpn));
         ui->menu_spmode_system_proxy->setChecked(Configs::dataManager->settingsRepo->spmode_system_proxy);
         ui->menu_spmode_vpn->setChecked(Configs::dataManager->settingsRepo->spmode_vpn);
     });
-    connect(ui->menu_spmode_system_proxy, &QAction::triggered, this, [=,this](bool checked) { set_spmode_system_proxy(checked); });
-    connect(ui->menu_spmode_vpn, &QAction::triggered, this, [=,this](bool checked) { set_spmode_vpn(checked); });
+    connect(ui->menu_spmode_system_proxy, &QAction::triggered, this, [=,this](bool checked) { m_connection->setSystemProxy(checked); });
+    connect(ui->menu_spmode_vpn, &QAction::triggered, this, [=,this](bool checked) { m_connection->setTun(checked); });
     connect(ui->menu_spmode_disabled, &QAction::triggered, this, [=,this]() {
-        set_spmode_system_proxy(false);
-        set_spmode_vpn(false);
+        m_connection->setSystemProxy(false);
+        m_connection->setTun(false);
     });
     connect(ui->menu_qr, &QAction::triggered, this, [=,this]() { display_qr_link(false); });
 
@@ -817,7 +827,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             Configs::dataManager->settingsRepo->adblock_enable = checked;
             actionAdblock->setChecked(checked);
             Configs::dataManager->settingsRepo->Save();
-            if (Configs::dataManager->settingsRepo->started_id >= 0) profile_start(Configs::dataManager->settingsRepo->started_id);
+            m_connection->restartStartedProfile();
         });
         ui->menuRouting_Menu->addAction(actionAdblock);
 
@@ -829,7 +839,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             Configs::dataManager->settingsRepo->enable_warp = checked;
             actionWarp->setChecked(checked);
             Configs::dataManager->settingsRepo->Save();
-            if (Configs::dataManager->settingsRepo->started_id >= 0) profile_start(Configs::dataManager->settingsRepo->started_id);
+            m_connection->restartStartedProfile();
         });
         ui->menuRouting_Menu->addAction(actionWarp);
 
@@ -863,7 +873,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             action->setData(route->id);
             action->setCheckable(true);
             action->setChecked(Configs::dataManager->settingsRepo->current_route_id == route->id);
-            connect(action, &QAction::triggered, this, [=,this]() { choose_route(action->data().toInt()); });
+            connect(action, &QAction::triggered, this, [=,this]() { m_connection->chooseRoute(action->data().toInt()); });
             ui->menuRouting_Menu->addAction(action);
         }
     });
@@ -1008,8 +1018,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     else if (tray->isVisible()) HideWindow(this);
 
     // Connected only now: the handler refreshes the tray and views, which do not exist when apply() first runs above.
-    connect(Sys::KillSwitch::instance(), &Sys::KillSwitch::stateChanged, this, [this] { kill_switch_state_changed(); });
-    QTimer::singleShot(0, this, [this] { kill_switch_state_changed(); });
+    m_connection->attachKillSwitch();
 
     ui->data_view->setStyleSheet("background: transparent; border: none;");
 
@@ -1018,11 +1027,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(ui->data_view, &QTextBrowser::anchorClicked, this, [this](const QUrl& url) {
         const auto action = url.toString();
         if (action == QLatin1String(DataViewHtmlGenerator::RestartActionUrl)) {
-            const int startedID = Configs::dataManager->settingsRepo->started_id;
-            clearRestartNeeded();
-            if (startedID >= 0) profile_start(startedID);
+            m_connection->applyPendingRestart();
         } else if (action == QLatin1String(DataViewHtmlGenerator::DismissRestartActionUrl)) {
-            clearRestartNeeded();
+            m_connection->clearRestartNeeded();
         }
     });
 

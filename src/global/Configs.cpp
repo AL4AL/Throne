@@ -119,6 +119,10 @@ namespace Configs {
 #endif
     }
 
+    void SetKnownAdmin(bool admin) {
+        isAdminCache = admin ? 1 : 0;
+    }
+
     namespace {
         QString basePathOverride;
     } // namespace

@@ -19,6 +19,9 @@ namespace Configs {
     // The cached IsAdmin answer without an RPC or side effects; empty while unknown. Main thread.
     std::optional<bool> KnownAdmin();
 
+    // Caches an answer IsAdmin would have fetched, such as the core's privilege probe. Main thread.
+    void SetKnownAdmin(bool admin);
+
     bool isSetuidSet(const std::string& path);
 
     // Set once at startup to the resolved data dir; before that GetBasePath() falls back to the old guess.

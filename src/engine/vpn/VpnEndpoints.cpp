@@ -3,6 +3,7 @@
 #include "include/api/RPC.h"
 #include "include/database/DatabaseManager.h"
 #include "include/database/ProfilesRepo.h"
+#include "include/engine/EngineTr.h"
 
 #include <QMutex>
 #include <QObject>
@@ -97,5 +98,29 @@ namespace Stats {
         if (m > 0) parts << QStringLiteral("%1m").arg(m);
         if (d == 0 && h == 0) parts << QStringLiteral("%1s").arg(seconds);
         return parts.join(QLatin1Char(' '));
+    }
+
+    std::shared_ptr<Configs::Profile> VpnExitEndpoint(const std::shared_ptr<Configs::Profile> &ent) {
+        auto hop = ent;
+        // The "proxy" tag lands on the exit hop, and the stored list runs in to out.
+        if (hop != nullptr && hop->type == "chain") {
+            const auto *chain = hop->Chain();
+            if (chain == nullptr || chain->list.isEmpty()) return nullptr;
+            hop = Configs::dataManager->profilesRepo->GetProfile(chain->list.back());
+        }
+        if (hop == nullptr) return nullptr;
+        if (hop->type != "openvpn" && hop->type != "openconnect") return nullptr;
+        return hop;
+    }
+
+    QString VpnExitStateText(const QString &state, const QString &error) {
+        if (state == "connected") return MainWindowTr::tr("Connect OK");
+        if (state == "connecting") return MainWindowTr::tr("Connecting");
+        if (state == "auth-pending") return MainWindowTr::tr("Waiting for authentication");
+        if (state == "error") {
+            return error.isEmpty() ? MainWindowTr::tr("Tunnel error")
+                                   : MainWindowTr::tr("Tunnel error") + ": " + error;
+        }
+        return state;
     }
 } // namespace Stats

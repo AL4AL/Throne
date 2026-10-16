@@ -3,6 +3,7 @@
 #include <QDialog>
 #include <QList>
 #include <QPair>
+#include <QPointer>
 #include <QString>
 
 #include "include/engine/vpn/VpnAuth.h"
@@ -10,6 +11,10 @@
 
 namespace Ui {
 class DialogVpnAuth;
+}
+
+namespace Engine {
+    class VpnAuthController;
 }
 
 class QAbstractButton;
@@ -23,7 +28,7 @@ class DialogVpnAuth : public QDialog {
 
 public:
     // `localOnly`: no challenge exists core-side, so nothing is submitted or cancelled.
-    DialogVpnAuth(QWidget *parent, const VpnAuthChallenge &challenge, bool localOnly = false);
+    DialogVpnAuth(QWidget *parent, Engine::VpnAuthController *auth, const VpnAuthChallenge &challenge, bool localOnly = false);
 
     ~DialogVpnAuth() override;
 
@@ -58,6 +63,7 @@ private:
     void fitToContent();
 
     Ui::DialogVpnAuth *ui;
+    QPointer<Engine::VpnAuthController> auth;
     VpnAuthChallenge challenge;
     bool localOnly = false;
     CloseAction closeAction = CloseAction::Cancel;

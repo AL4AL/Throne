@@ -1,49 +1,51 @@
 #include "include/ui/mainWindow/MainWindowEngineControl.h"
 
 #include "include/ui/mainwindow.h"
+#include "include/engine/connection/ConnectionManager.h"
 #include "include/engine/services/StatsService.h"
 #include "include/engine/tests/TestRunner.h"
 
-MainWindowEngineControl::MainWindowEngineControl(MainWindow *mw) : EngineControl(mw), mw_(mw) {
-    connect(mw, &MainWindow::start_finished, this, &Engine::EngineControl::startFinished, Qt::DirectConnection);
-    connect(mw, &MainWindow::stop_finished, this, &Engine::EngineControl::stopFinished, Qt::DirectConnection);
-    connect(mw, &MainWindow::connection_state_changed, this, &Engine::EngineControl::connectionStateChanged, Qt::DirectConnection);
+MainWindowEngineControl::MainWindowEngineControl(MainWindow *mw, Engine::ConnectionManager *connection)
+    : EngineControl(mw), mw_(mw), connection_(connection) {
+    connect(connection_, &Engine::ConnectionManager::startFinished, this, &Engine::EngineControl::startFinished, Qt::DirectConnection);
+    connect(connection_, &Engine::ConnectionManager::stopFinished, this, &Engine::EngineControl::stopFinished, Qt::DirectConnection);
+    connect(connection_, &Engine::ConnectionManager::connectionStateChanged, this, &Engine::EngineControl::connectionStateChanged, Qt::DirectConnection);
 }
 
 Engine::ConnectionState MainWindowEngineControl::connectionState() const {
-    return mw_->connection_state();
+    return connection_->connectionState();
 }
 
 std::shared_ptr<Configs::Profile> MainWindowEngineControl::runningSnapshot() const {
-    return mw_->runningSnapshot();
+    return connection_->runningSnapshot();
 }
 
 int MainWindowEngineControl::resolveLastProfile() {
-    return mw_->resolve_last_profile();
+    return connection_->resolveLastProfile();
 }
 
 quint64 MainWindowEngineControl::nextStartSerial() {
-    return mw_->next_start_serial();
+    return connection_->nextStartSerial();
 }
 
 void MainWindowEngineControl::start(const Engine::StartRequest &request) {
-    mw_->profile_start(request);
+    connection_->start(request);
 }
 
 void MainWindowEngineControl::stop(const Engine::StopOptions &options) {
-    mw_->profile_stop(options.crash, options.block, options.manual, options.interactive);
+    connection_->stop(options);
 }
 
 bool MainWindowEngineControl::setSystemProxy(bool enable, const Engine::ModeChange &change) {
-    return mw_->set_spmode_system_proxy(enable, change);
+    return connection_->setSystemProxy(enable, change);
 }
 
 bool MainWindowEngineControl::setTun(bool enable, const Engine::ModeChange &change) {
-    return mw_->set_spmode_vpn(enable, change);
+    return connection_->setTun(enable, change);
 }
 
 bool MainWindowEngineControl::chooseRoute(int routeId, bool interactive, quint64 serial) {
-    return mw_->choose_route(routeId, interactive, serial);
+    return connection_->chooseRoute(routeId, interactive, serial);
 }
 
 int MainWindowEngineControl::clearTestResults(const QList<int> &profileIds) {
@@ -51,7 +53,7 @@ int MainWindowEngineControl::clearTestResults(const QList<int> &profileIds) {
 }
 
 std::optional<Engine::LiveRates> MainWindowEngineControl::freshLiveRates(qint64 maxAgeMs) const {
-    if (mw_->runningSnapshot() == nullptr) return std::nullopt;
+    if (connection_->runningSnapshot() == nullptr) return std::nullopt;
     return mw_->m_stats->freshLiveRates(maxAgeMs);
 }
 
@@ -81,18 +83,11 @@ void MainWindowEngineControl::stopTests() {
 }
 
 void MainWindowEngineControl::noteRestartNeeded(Engine::RestartReason reason) {
-    QString text;
-    switch (reason) {
-        case Engine::RestartReason::Settings: text = MainWindow::tr("Settings"); break;
-        case Engine::RestartReason::Routing: text = MainWindow::tr("Routing"); break;
-        case Engine::RestartReason::Profile: text = MainWindow::tr("Profile"); break;
-        case Engine::RestartReason::Group: text = MainWindow::tr("Group"); break;
-    }
-    mw_->noteRestartNeeded(text);
+    connection_->noteRestartNeeded(reason);
 }
 
 bool MainWindowEngineControl::restartPending() const {
-    return !mw_->pendingRestartReasons().isEmpty();
+    return connection_->restartPending();
 }
 
 bool MainWindowEngineControl::requestExit(Engine::ExitReason reason) {

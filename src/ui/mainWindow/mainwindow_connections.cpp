@@ -3,6 +3,7 @@
 #include "include/database/entities/RouteProfile.h"
 #include "include/database/RoutesRepo.h"
 #include "include/database/SettingsRepo.h"
+#include "include/engine/connection/ConnectionManager.h"
 #include "include/engine/services/StatsService.h"
 #include "include/global/LocalNetwork.hpp"
 #include "include/ui/utils/ConnectionsFilterHeader.h"
@@ -458,7 +459,7 @@ MainWindow::RuleToggle MainWindow::toggleRuleInCurrentRoute(const QString& rawRu
         return fail(tr("Failed to save routing rule: %1").arg(rawRule));
 
     MW_show_log(log);
-    noteRestartNeeded(tr("Routing"));
+    m_connection->noteRestartNeeded(Engine::RestartReason::Routing);
     return result;
 }
 

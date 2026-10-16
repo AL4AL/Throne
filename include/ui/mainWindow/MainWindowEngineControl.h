@@ -4,11 +4,15 @@
 
 class MainWindow;
 
+namespace Engine {
+    class ConnectionManager;
+}
+
 class MainWindowEngineControl final : public Engine::EngineControl {
     Q_OBJECT
 
 public:
-    explicit MainWindowEngineControl(MainWindow *mw);
+    explicit MainWindowEngineControl(MainWindow *mw, Engine::ConnectionManager *connection);
 
     Engine::ConnectionState connectionState() const override;
 
@@ -50,5 +54,6 @@ public:
 
 private:
     MainWindow *mw_;
+    Engine::ConnectionManager *connection_;
     bool exitQueued_ = false;
 };

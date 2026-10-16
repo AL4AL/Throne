@@ -50,7 +50,8 @@ namespace API {
 
         QString CheckConfig(bool *rpcOK, const QString& config, bool isXray = false) const;
 
-        bool IsPrivileged(bool *rpcOK) const;
+        // timeoutMs 0 = the channel default.
+        bool IsPrivileged(bool *rpcOK, int timeoutMs = 0) const;
 
         libcore::SpeedTestResponse SpeedTest(bool *rpcOK, const libcore::SpeedTestRequest &request, QString *coreError = nullptr);
 

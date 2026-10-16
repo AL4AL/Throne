@@ -7,6 +7,7 @@
 #include <QResizeEvent>
 #include <QTimer>
 
+#include "include/engine/connection/ConnectionManager.h"
 #include "include/ui/widget/TrayOtpCodes.hpp"
 #include "include/ui/widget/TrayProfileSelector.hpp"
 
@@ -149,7 +150,7 @@ void MainWindow::openTraySelector(bool routing) {
     TrayProfileSelector::Callbacks cb;
     cb.startProfile = [this](int id) { profile_start(id); };
     cb.stopProfile = [this]() { profile_stop(false, false, true); };
-    cb.chooseRoute = [this](int id) { choose_route(id); };
+    cb.chooseRoute = [this](int id) { m_connection->chooseRoute(id); };
     cb.isRunning = [this]() { return runningSnapshot() != nullptr; };
     cb.runningId = [this]() {
         const auto running = runningSnapshot();

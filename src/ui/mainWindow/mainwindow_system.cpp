@@ -17,6 +17,7 @@
 #include "include/api/remote/Server.hpp"
 #include "include/configs/generate.h"
 #include "include/engine/ThreadCheck.h"
+#include "include/engine/connection/ConnectionManager.h"
 #include "include/engine/supervisor/CoreSupervisor.h"
 #include "include/global/Configs.hpp"
 #include "include/global/HTTPRequestHelper.hpp"
@@ -131,13 +132,13 @@ void MainWindow::prepare_exit(bool interactive)
     // Before the waits below: their nested event loops would dispatch API requests mid-teardown.
     RemoteApi::Server::instance()->shutdown();
     // Unconditional: an uncheck may still have its clear queued.
-    set_system_proxy(false, true);
+    m_connection->applySystemProxy(false, true);
     RegisterHiddenMenuShortcuts(true);
     RegisterHotkey(true);
     on_commitDataRequest();
     Scanner::ScanManager::instance()->StopAll(true);
     Configs::dataManager->settingsRepo->noSave = true; // don't change Configs::dataManager->settingsRepo after this line
-    profile_stop(false, true, false, interactive);
+    m_connection->stop({false, true, false, interactive});
 
     m_coreSupervisor->shutdown();
     HideWindow(this);
@@ -216,129 +217,16 @@ void MainWindow::request_unattended_exit(ExitReason reason) {
 void MainWindow::toggle_system_proxy() {
     auto currentState = Configs::dataManager->settingsRepo->spmode_system_proxy;
     if (currentState) {
-        set_spmode_system_proxy(false);
+        m_connection->setSystemProxy(false);
     } else {
-        set_spmode_system_proxy(true);
+        m_connection->setSystemProxy(true);
     }
 }
 
 void MainWindow::toggle_tun() {
-    if (m_profileConnecting || m_profileDisconnecting) return;
-    set_spmode_vpn(!Configs::dataManager->settingsRepo->spmode_vpn);
-}
-
-bool MainWindow::get_elevated_permissions(bool interactive) {
-    if (Configs::dataManager->settingsRepo->disable_privilege_req)
-    {
-        MW_show_log(tr("User opted for no privilege req, some features may not work"));
-        return true;
-    }
-    if (Configs::IsAdmin()) return true;
-    if (!interactive) return false;
-    return policy()->requestCorePrivileges();
-}
-
-namespace {
-    // networksetup and gsettings runs are slow, and profile start/stop call in from their own threads.
-    QThread *systemProxyThread() {
-        static auto *thread = [] {
-            auto *t = new QThread;
-            t->start();
-            return t;
-        }();
-        return thread;
-    }
-}
-
-void MainWindow::set_system_proxy(bool enable, bool wait) {
-    const auto &settings = Configs::dataManager->settingsRepo;
-    const auto host = LocalNetwork::InboundConnectHost();
-    const auto port = settings->inbound_socks_port;
-    const auto format = settings->proxy_scheme;
-    runOnThread([=] {
-        QString error;
-        if (!enable) {
-            error = SystemProxy_Clear();
-        } else if (Configs::dataManager->settingsRepo->spmode_system_proxy) {
-            // Rechecked: a profile start can queue this after the box was unchecked.
-            error = SystemProxy_Apply(host, port, format);
-        }
-        if (!error.isEmpty()) MW_show_log(tr("System proxy: %1").arg(error));
-    }, systemProxyThread(), wait);
-}
-
-void MainWindow::set_spmode_system_proxy(bool enable, bool save) {
-    set_spmode_system_proxy(enable, ModeChange{.save = save});
-}
-
-bool MainWindow::set_spmode_system_proxy(bool enable, const ModeChange &change) {
-    ENGINE_CHECK_MAIN_THREAD();
-    const auto &settings = Configs::dataManager->settingsRepo;
-    if (enable && settings->disable_mixed_inbound) {
-        if (change.interactive) {
-            runOnUiThread([=, this] {
-               policy()->systemProxyNeedsMixedInbound();
-            });
-        }
-        ui->checkBox_SystemProxy->setChecked(false);
-        return false;
-    }
-    settings->spmode_system_proxy = enable;
-    bool restarted = false;
-    if (const auto running = runningSnapshot()) {
-        set_system_proxy(enable);
-        if (!enable && settings->reset_proxy_on_disable_sp && change.restart) {
-            profile_start(StartRequest{running->id, change.interactive, change.restartSerial});
-            restarted = true;
-        }
-    }
-
-    if (change.save) {
-        settings->remember_system_proxy = enable;
-        settings->Save();
-    }
-
-    refresh_status();
-    return restarted;
-}
-
-void MainWindow::set_spmode_vpn(bool enable, bool save) {
-    set_spmode_vpn(enable, ModeChange{.save = save});
-}
-
-bool MainWindow::set_spmode_vpn(bool enable, const ModeChange &change) {
-    ENGINE_CHECK_MAIN_THREAD();
-    const auto &settings = Configs::dataManager->settingsRepo;
-    if (enable == settings->spmode_vpn) return false;
-
-    if (enable && !Configs::IsAdmin() && !get_elevated_permissions(change.interactive)) {
-        refresh_status();
-        return false;
-    }
-
-    if (change.save) {
-        // Written here, after the elevation check, so a failed enable is not remembered.
-        settings->remember_tun = enable;
-        settings->Save();
-    }
-
-    settings->spmode_vpn = enable;
-    refresh_status();
-
-    if (!change.restart || settings->started_id < 0) return false;
-    profile_start(StartRequest{settings->started_id, change.interactive, change.restartSerial});
-    return true;
-}
-
-bool MainWindow::choose_route(int routeId, bool interactive, quint64 restartSerial) {
-    ENGINE_CHECK_MAIN_THREAD();
-    const auto &settings = Configs::dataManager->settingsRepo;
-    if (settings->current_route_id == routeId) return false;
-    settings->current_route_id = routeId;
-    settings->Save();
-    if (settings->started_id < 0) return false;
-    profile_start(StartRequest{settings->started_id, interactive, restartSerial});
-    return true;
+    const auto state = m_connection->connectionState();
+    if (state == ConnectionState::Connecting || state == ConnectionState::Stopping) return;
+    m_connection->setTun(!Configs::dataManager->settingsRepo->spmode_vpn);
 }
 
 bool MainWindow::StopVPNProcess() {
@@ -348,23 +236,6 @@ bool MainWindow::StopVPNProcess() {
 
 void MainWindow::RestartCore() {
     m_coreSupervisor->resetCore();
-}
-
-void MainWindow::kill_switch_state_changed() {
-    const auto state = Sys::KillSwitch::instance()->state();
-    const bool failed = state == Sys::KillSwitch::State::Failed;
-    const bool armed = state == Sys::KillSwitch::State::Armed;
-    const bool enteredFailed = failed && !m_killSwitchWasFailed;
-    const bool enteredArmed = armed && !m_killSwitchWasArmed;
-    m_killSwitchWasFailed = failed;
-    m_killSwitchWasArmed = armed;
-
-    refresh_status();
-    if (!failed) policy()->killSwitchProblemResolved();
-    if (enteredFailed) policy()->killSwitchProblem();
-    if (enteredArmed && !guard_core_restart_pending() && core_lacks_guard_identity()) {
-        restart_core_for_guard(StartRequest{Configs::dataManager->settingsRepo->started_id});
-    }
 }
 
 void MainWindow::show_startstop_menu() {
@@ -386,37 +257,9 @@ void MainWindow::confirm_disable_kill_switch() {
     box->setDefaultButton(cancel);
     box->setEscapeButton(cancel);
     connect(box, &QMessageBox::finished, this, [this, box, disable] {
-        if (box->clickedButton() == disable) disable_kill_switch();
+        if (box->clickedButton() == disable) m_connection->disableKillSwitch();
     });
     box->open();
-}
-
-void MainWindow::disable_kill_switch() {
-    Configs::dataManager->settingsRepo->kill_switch = false;
-    Configs::dataManager->settingsRepo->Save();
-    Sys::KillSwitch::instance()->apply();
-}
-
-bool MainWindow::core_lacks_guard_identity() {
-    return m_coreSupervisor->runningWithoutGuardIdentity();
-}
-
-bool MainWindow::guard_core_restart_pending() const {
-    constexpr qint64 kRestartWindowMs = 15000;
-    return m_guardCoreRestart.isValid() && !m_guardCoreRestart.hasExpired(kRestartWindowMs);
-}
-
-void MainWindow::restart_core_for_guard(const StartRequest &request) {
-    const bool haveCore = m_coreSupervisor->setStartWhenUp(request.profileId);
-    if (!haveCore) {
-        emit start_finished(request.serial, request.profileId, StartOutcome::CoreUnavailable, {});
-        return;
-    }
-    defer_start_to_core(request);
-    if (guard_core_restart_pending()) return;
-    m_guardCoreRestart.start();
-    MW_show_log(tr("[Kill switch] Restarting the core so that its own traffic passes the kill switch..."));
-    m_coreSupervisor->restartForGuard();
 }
 
 namespace {

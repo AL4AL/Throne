@@ -46,5 +46,7 @@ namespace Engine {
         bool confirmRestartProgram() override;
 
         void testSessionBusy(const QString &text) override;
+
+        bool pickInsteadOfStart(int profileId) override;
     };
 } // namespace Engine

@@ -54,10 +54,12 @@ namespace Configs {
 
 namespace Engine {
     class AutoSelectorController;
+    class ConnectionManager;
     class CoreSupervisor;
     class EngineControl;
     class StatsService;
     class TestRunner;
+    class VpnAuthController;
 }
 
 class QMessageBox;
@@ -68,14 +70,6 @@ class MainWindowEngineControl;
 class DialogVpnAuth;
 class DialogScanner;
 class DialogIpLists;
-
-struct VpnEndpointState {
-    QString tag;
-    QString state;
-    QString error;
-    bool connected = false;
-    bool authFailed = false;
-};
 
 namespace Qv2ray::ui { class SyntaxHighlighter; }
 
@@ -142,37 +136,17 @@ public:
 
     void profile_start(int _id = -1);
 
-    void profile_start(const StartRequest &request);
-
     void profile_stop(bool crash = false, bool block = false, bool manual = false, bool interactive = true);
 
     int get_profile_to_start();
 
-    // Started, then last running, then remembered profile; unlike get_profile_to_start(), ignores the table selection.
-    int resolve_last_profile();
-
-    ConnectionState connection_state() const;
-
     // Safe from any thread.
     std::shared_ptr<Configs::Profile> runningSnapshot() const;
 
-    quint64 next_start_serial();
-
-    void set_spmode_system_proxy(bool enable, bool save = true);
-
     void toggle_system_proxy();
-
-    void set_spmode_vpn(bool enable, bool save = true);
-
-    // Each returns whether it restarted the profile.
-    bool set_spmode_system_proxy(bool enable, const ModeChange &change);
-
-    bool set_spmode_vpn(bool enable, const ModeChange &change);
 
     // Engine half of MwMessage::UpdateSettings; its dialogs appear only when interactive.
     void applySettingsChange(const QStringList &flags, bool interactive);
-
-    bool get_elevated_permissions(bool interactive = true);
 
     void start_select_mode(QObject *context, const std::function<void(int)> &callback);
 
@@ -190,12 +164,6 @@ public:
 
     void UpdateDataView(bool force = false);
 
-    void noteRestartNeeded(const QString& reason);
-
-    void clearRestartNeeded();
-
-    QStringList pendingRestartReasons() const;
-
     void refresh_auto_selector_view();
 
     class DialogAutoSelector *m_autoSelectorDialog = nullptr;
@@ -211,14 +179,6 @@ public:
 signals:
 
     void profile_selected(int id);
-
-    void connection_state_changed(Engine::ConnectionState state);
-
-    void start_finished(quint64 serial, int profileId, Engine::StartOutcome outcome, const QString &error);
-
-    void stop_finished(int profileId);
-
-    void restart_pending_changed();
 
 public slots:
 
@@ -298,7 +258,7 @@ private:
     ProfilesTableModel *profilesTableModel = nullptr;
 
     ProfilesFilterProxyModel *profilesFilterModel = nullptr;
-    TrayIcon *tray;
+    TrayIcon *tray = nullptr;
     QMenu *trayMenu = nullptr;
     QAction *trayConnectAction = nullptr;
     QPointer<TrayProfileSelector> traySelector;
@@ -311,23 +271,14 @@ private:
     std::unique_ptr<Engine::AutoSelectorController> m_autoSelector;
     Engine::CoreSupervisor *m_coreSupervisor = nullptr;
     Engine::StatsService *m_stats = nullptr;
+    Engine::ConnectionManager *m_connection = nullptr;
+    Engine::VpnAuthController *m_vpnAuth = nullptr;
     QTextDocument *qvLogDocument = new QTextDocument(this);
     QString title_error;
     std::optional<Icon::TrayIconStatus> icon_status;
-    // Written by the start/stop workers; read through runningSnapshot().
-    mutable QMutex m_runningMutex;
-    std::shared_ptr<Configs::Profile> m_running;
-    void setRunning(std::shared_ptr<Configs::Profile> profile);
-    int last_running_profile_id = -1;
-    bool m_profileConnecting = false;
-    bool m_profileDisconnecting = false;
-    ConnectionState m_lastConnectionState = ConnectionState::Idle;
-    quint64 m_startSerial = 0;
     QString traffic_update_cache;
     qint64 last_test_time = 0;
     bool select_mode = false;
-    QMutex mu_starting;
-    QMutex mu_stopping;
     QMutex mu_exit;
     ExitReason exit_reason = ExitReason::None;
     // Set by request_unattended_exit: no dialog during the teardown, and a restart stays in the tray when the window was hidden.
@@ -353,14 +304,10 @@ private:
     QList<Stats::TrafficLine> m_trafficLines;
     QTimer *m_trafficGraphSaveDebounce = nullptr;
     QAction *m_trafficStatsChartAction = nullptr;
-    // Set while profile_start stops the running profile, so that stop is marked as part of the switch.
-    std::atomic<bool> m_switchingProfile = false;
     using LiveRates = Engine::LiveRates;
     class RuntimeStatsWidget *runtimeStatsWidget = nullptr;
     std::atomic<qint64> lastUpdatedMs = QDateTime::currentMSecsSinceEpoch();
     DataViewHtmlGenerator dataViewHtmlGenerator_;
-    // UI thread only; the data view renders a copy.
-    QStringList m_restartReasons;
     Engine::EngineControl *m_engineControl = nullptr;
 
     QList<QShortcut*> hiddenMenuShortcuts;
@@ -445,12 +392,16 @@ private:
     QList<int> get_now_selected_list();
     void refresh_startstop_button();
 
-    void sync_connection_state();
+    // View slots of ConnectionManager and VpnAuthController, in mainwindow_view.cpp.
+    void addRunMarker(qint64 monoMs, Engine::RunMarker kind, const QString &name);
+
+    void showRestartReasons();
+
+    void showVpnEndpointStatus(const QString &summary, const QString &detail, bool problem);
+
+    static QString restartReasonText(Engine::RestartReason reason);
 
     QList<int> get_selected_or_group();
-
-    // Queued on one worker thread in call order; wait blocks until this change has run.
-    void set_system_proxy(bool enable, bool wait = false);
 
     void saveProfileFocusState();
 
@@ -464,9 +415,6 @@ private:
 
     // Returns how many profiles it cleared.
     int clear_test_results(const QList<int> &profileIds);
-
-    // Returns whether it restarted the profile.
-    bool choose_route(int routeId, bool interactive = true, quint64 restartSerial = 0);
 
     void request_unattended_exit(ExitReason reason);
 
@@ -540,10 +488,6 @@ private:
 
     void toggle_tun();
 
-    void fail_start(const StartRequest &request, StartOutcome outcome, const QString &title, const QString &error);
-
-    void defer_start_to_core(const StartRequest &request);
-
     void RegisterHiddenMenuShortcuts(bool unregister = false);
     void registerMenuShortcuts(QMenu *menu, QSet<QKeySequence> &claimed);
     void collectMenuShortcuts(QMenu *menu, QSet<QKeySequence> &out);
@@ -554,87 +498,19 @@ private:
 
     void loadShortcuts();
 
-    void on_core_started(int profileId);
-
-    void on_core_gave_up(const QString &reason);
-
-    bool handleXrayGeoAssetError(const QString& error, const QString& contextName, bool prompt = true);
-
     void url_test_current();
-
-    static std::shared_ptr<Configs::Profile> vpn_exit_endpoint(const std::shared_ptr<Configs::Profile> &ent);
-
-    static QString vpn_state_text(const QString &state, const QString &error);
-
-    void start_vpn_challenge_poll();
-
-    void stop_vpn_challenge_poll();
-
-    void poll_vpn_challenges();
-
-    void show_vpn_challenge(const VpnAuthChallenge &challenge);
-
-    // True once the challenge is either submitted or deliberately held back for a fresher code.
-    bool auto_answer_vpn_challenge(const VpnAuthChallenge &challenge);
-
-    void submit_vpn_challenge_answer(const VpnAuthChallenge &challenge, const QString &username,
-                                     const QString &password, const QString &secret,
-                                     const QMap<QString, QString> &formValues);
-
-    void show_vpn_auth_failure(const QString &endpointTag, const QString &error);
-
-    bool auto_restart_for_vpn_auth(const QString &endpointTag, int profileID);
-
-    void update_vpn_endpoint_states(const QList<VpnEndpointState> &states);
-
-    void reset_vpn_endpoint_tracking();
-
-    void clear_vpn_credential_overrides();
-
-    void kill_switch_state_changed();
 
     void show_startstop_menu();
 
     void confirm_disable_kill_switch();
 
-    void disable_kill_switch();
-
-    // Linux/macOS: a core started before the kill switch was on has not adopted the guard group.
-    bool core_lacks_guard_identity();
-
-    bool guard_core_restart_pending() const;
-
-    // The restarted core starts the request through coreStarted; a start requested meanwhile replaces it.
-    void restart_core_for_guard(const StartRequest &request);
-
     QPointer<QMessageBox> m_killSwitchDialog;
-    bool m_killSwitchWasFailed = false;
-    bool m_killSwitchWasArmed = false;
-    StartRequest m_killSwitchDeferredStart;
-    // coreStarted carries only a profile id, so the rest of the request waits here.
-    StartRequest m_coreStartRequest;
-    QElapsedTimer m_guardCoreRestart;
 
-    QTimer *m_vpnChallengeTimer = nullptr;
-    std::atomic<bool> m_vpnChallengeBusy{false};
-    QSet<QString> m_vpnChallengeSeen;
     QPointer<DialogVpnAuth> m_vpnAuthDialog;
     QPointer<DialogScanner> m_scannerDialog;
     QPointer<DialogIpLists> m_ipListsDialog;
     QHash<int, QString> m_scannerNames;
     bool m_scannerPanelShown = false;
-    QString m_vpnEndpointState;
-    QString m_vpnTroubleSummary;
-    QString m_vpnTroubleDetail;
-    QHash<QString, QString> m_vpnEndpointLastState;
-    QHash<QString, QString> m_vpnOtpLastCode;
-    QHash<QString, int> m_vpnOtpRejects;
-    QSet<QString> m_vpnChallengeAnswering;
-    QHash<int, int> m_vpnAutoRestarts;
-    qint64 m_vpnAutoRestartAt = 0;
-    // Survives the restart the recovery itself triggers, so a rejected retry cannot loop.
-    QHash<int, int> m_vpnAuthPrompted;
-    int m_vpnAuthRestartID = -1;
 
     void CheckUpdate();
 
@@ -724,6 +600,8 @@ private:
     bool confirmRestartProgram() override;
 
     void testSessionBusy(const QString &text) override;
+
+    bool pickInsteadOfStart(int profileId) override;
 
     // TestObserver, in mainwindow_view.cpp; synchronous, so a panel seed never lands after the next session's clear.
     void testPanelSeeded(Engine::TestKind kind, int totalProfiles) override;

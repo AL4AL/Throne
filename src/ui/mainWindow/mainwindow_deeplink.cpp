@@ -18,6 +18,7 @@
 #include "include/database/GroupsRepo.h"
 #include "include/database/RoutesRepo.h"
 #include "include/engine/ThreadCheck.h"
+#include "include/engine/connection/ConnectionManager.h"
 #include "include/global/Logger.hpp"
 #include "include/global/PeriodicRunner.hpp"
 #include "include/sys/AutoRun.hpp"
@@ -292,8 +293,8 @@ void MainWindow::applySettingsChange(const QStringList &flags, bool interactive)
         settings->inbound_socks_port = MkPort(settings->inbound_address);
         if (settings->spmode_system_proxy) {
             const ModeChange change{.interactive = interactive};
-            set_spmode_system_proxy(false, change);
-            set_spmode_system_proxy(true, change);
+            m_connection->setSystemProxy(false, change);
+            m_connection->setSystemProxy(true, change);
         }
     }
     if (changed(MwArg::DisableAdmin)) {
@@ -315,7 +316,7 @@ void MainWindow::applySettingsChange(const QStringList &flags, bool interactive)
         else MW_show_log(tr("Tun Settings changed") + ": " + tr("Restart Tun to take effect."));
     }
     if (changed(MwArg::ChoosePort) || suggestRestartProxy) {
-        noteRestartNeeded(changed(MwArg::Route) ? tr("Routing") : tr("Settings"));
+        m_connection->noteRestartNeeded(changed(MwArg::Route) ? Engine::RestartReason::Routing : Engine::RestartReason::Settings);
     }
     refresh_status();
     if (changed(MwArg::NeedRestart)) {
@@ -380,12 +381,12 @@ void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
         break;
     case MwMessage::ProfileChanged:
         refresh_proxy_list({}, true);
-        if (changed(MwArg::RestartProxy)) noteRestartNeeded(tr("Profile"));
+        if (changed(MwArg::RestartProxy)) m_connection->noteRestartNeeded(Engine::RestartReason::Profile);
         break;
     case MwMessage::GroupsChanged:
         refresh_groups();
         profilesTableModel->invalidateAddresses();
-        if (changed(MwArg::RestartProxy)) noteRestartNeeded(tr("Group"));
+        if (changed(MwArg::RestartProxy)) m_connection->noteRestartNeeded(Engine::RestartReason::Group);
         break;
     case MwMessage::SubscriptionFinished:
         refresh_proxy_list({}, true);
@@ -403,34 +404,4 @@ void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList &args) {
         if (args.contains(Int2String(settings->current_group))) refresh_proxy_list({}, true);
         break;
     }
-}
-
-void MainWindow::on_core_started(int profileId) {
-    auto &settings = Configs::dataManager->settingsRepo;
-    m_guardCoreRestart.invalidate();
-    // The core may just have been given root, which the guard needs too.
-    if (Sys::KillSwitch::instance()->failedForPrivileges()) Sys::KillSwitch::instance()->apply();
-    if (settings->remember_enable && settings->remember_system_proxy) {
-        set_spmode_system_proxy(true, false);
-    }
-    if ((settings->remember_enable && settings->remember_tun) || settings->flag_restart_tun_on) {
-        set_spmode_vpn(true, settings->flag_restart_tun_on);
-        settings->flag_restart_tun_on = false;
-    }
-    {
-        const int id = profileId;
-        const auto request = std::exchange(m_coreStartRequest, StartRequest{});
-        if (request.profileId >= 0 && request.profileId != id) {
-            emit start_finished(request.serial, request.profileId, StartOutcome::Superseded, {});
-        }
-        if (id >= 0) profile_start(request.profileId == id ? request : StartRequest{id});
-    }
-    refresh_status();
-}
-
-void MainWindow::on_core_gave_up(const QString &reason) {
-    // Otherwise a start within the window would wait on a guard restart that is not coming.
-    m_guardCoreRestart.invalidate();
-    const auto request = std::exchange(m_coreStartRequest, StartRequest{});
-    if (request.profileId >= 0) emit start_finished(request.serial, request.profileId, StartOutcome::CoreUnavailable, reason);
 }

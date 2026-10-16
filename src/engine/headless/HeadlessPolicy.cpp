@@ -111,4 +111,8 @@ namespace Engine {
     void HeadlessPolicy::testSessionBusy(const QString &text) {
         MW_show_log(text);
     }
+
+    bool HeadlessPolicy::pickInsteadOfStart(int) {
+        return false;
+    }
 } // namespace Engine

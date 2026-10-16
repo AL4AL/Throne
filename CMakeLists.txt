@@ -713,6 +713,11 @@ set(ENGINE_SOURCES
         src/engine/tests/TestRunner.cpp
         include/engine/autoselector/AutoSelectorController.h
         src/engine/autoselector/AutoSelectorController.cpp
+        include/engine/connection/ConnectionManager.h
+        src/engine/connection/ConnectionManager.cpp
+        src/engine/connection/ConnectionModes.cpp
+        include/engine/vpn/VpnAuthController.h
+        src/engine/vpn/VpnAuthController.cpp
         # Last: its <windows.h> macros must not reach a later TU of the same MSVC unity batch.
         include/engine/supervisor/CoreSupervisor.h
         src/engine/supervisor/CoreSupervisor.cpp

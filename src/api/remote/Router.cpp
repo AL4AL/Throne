@@ -451,6 +451,7 @@ namespace RemoteApi {
         const auto &settings = Configs::dataManager->settingsRepo;
         const auto running = engine_->runningSnapshot();
         const auto route = Configs::dataManager->routesRepo->GetRouteProfile(settings->current_route_id);
+        const auto admin = Configs::KnownAdmin();
         return {
             {"state", RouterImpl::connectionStateName(engine_->connectionState())},
             {"profile", running != nullptr ? QJsonValue(profileJson(running)) : QJsonValue()},
@@ -466,7 +467,8 @@ namespace RemoteApi {
                 {"port", settings->inbound_socks_port},
             }},
             {"capabilities", QJsonObject{
-                {"tun", Configs::KnownAdmin().value_or(false) || settings->disable_privilege_req},
+                // null until the core answers the privilege probe, rather than a false that is not known yet.
+                {"tun", settings->disable_privilege_req ? QJsonValue(true) : admin ? QJsonValue(*admin) : QJsonValue()},
                 {"kill_switch", RouterImpl::killSwitchSupported()},
                 {"headless", !IsGuiApp()},
             }},

@@ -29,7 +29,7 @@ namespace Engine {
 
     struct StartRequest {
         int profileId = -1;
-        // Unattended callers get every failure through start_finished and the log, never a dialog.
+        // Unattended callers get every failure through startFinished and the log, never a dialog.
         bool interactive = true;
         quint64 serial = 0;
     };
@@ -47,6 +47,13 @@ namespace Engine {
         bool interactive = true;
         bool restart = true;
         quint64 restartSerial = 0;
+    };
+
+    // Where the traffic chart marks a run.
+    enum class RunMarker {
+        Started,
+        Switched,
+        Stopped,
     };
 
     // Why the running profile should restart to apply a change; the view translates it.

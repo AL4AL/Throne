@@ -1,11 +1,17 @@
 #pragma once
 
+#include <memory>
+
 #include <QMap>
 #include <QString>
 #include <QStringList>
 
 namespace libcore {
     struct VPNEndpointStatus;
+}
+
+namespace Configs {
+    class Profile;
 }
 
 namespace Stats {
@@ -41,4 +47,9 @@ namespace Stats {
     QString VpnEndpointDisplayName(const QString &tag);
 
     int VpnEndpointProfileID(const QString &tag);
+
+    // The OpenVPN/OpenConnect endpoint a profile exits through, itself or the last hop of its chain; null when none.
+    std::shared_ptr<Configs::Profile> VpnExitEndpoint(const std::shared_ptr<Configs::Profile> &ent);
+
+    QString VpnExitStateText(const QString &state, const QString &error);
 } // namespace Stats

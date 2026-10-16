@@ -3,6 +3,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 
+#include "include/engine/connection/ConnectionManager.h"
 #include "include/sys/KillSwitch.hpp"
 #include "include/ui/profile/dialog_vpn_auth.h"
 #include "include/ui/utils/RestartPrompt.h"
@@ -76,7 +77,7 @@ void MainWindow::killSwitchProblem() {
         const auto *clicked = box->clickedButton();
         if (m_killSwitchDialog == box) m_killSwitchDialog = nullptr;
         if (clicked == disable) {
-            disable_kill_switch();
+            m_connection->disableKillSwitch();
             return;
         }
         if (clicked != fix) return;
@@ -91,8 +92,8 @@ void MainWindow::killSwitchProblem() {
             on_menu_exit_triggered();
         }, Qt::QueuedConnection);
 #else
-        // Otherwise the core restarts once it is privileged, and on_core_started retries.
-        if (get_elevated_permissions()) Sys::KillSwitch::instance()->apply();
+        // Otherwise the core restarts once it is privileged, and onCoreStarted retries.
+        if (m_connection->ensureTunPrivileges(true)) Sys::KillSwitch::instance()->apply();
 #endif
     });
     box->open();
@@ -217,7 +218,7 @@ bool MainWindow::vpnPromptOpen() const {
 }
 
 void MainWindow::vpnChallenge(const VpnAuthChallenge &challenge) {
-    auto *dialog = new DialogVpnAuth(this, challenge);
+    auto *dialog = new DialogVpnAuth(this, m_vpnAuth, challenge);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     m_vpnAuthDialog = dialog;
     dialog->show();
@@ -226,7 +227,7 @@ void MainWindow::vpnChallenge(const VpnAuthChallenge &challenge) {
 
 void MainWindow::vpnCredentialsRejected(int, const VpnAuthChallenge &challenge,
                                         const std::function<void(const QString &username, const QString &password)> &retryWith) {
-    auto *dialog = new DialogVpnAuth(this, challenge, true);
+    auto *dialog = new DialogVpnAuth(this, m_vpnAuth, challenge, true);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     m_vpnAuthDialog = dialog;
     connect(dialog, &QDialog::accepted, this, [dialog, retryWith] {
@@ -250,4 +251,12 @@ bool MainWindow::confirmRestartProgram() {
 
 void MainWindow::testSessionBusy(const QString &text) {
     MessageBoxWarning(software_name, text);
+}
+
+bool MainWindow::pickInsteadOfStart(int profileId) {
+    if (!select_mode) return false;
+    emit profile_selected(profileId);
+    select_mode = false;
+    refresh_status();
+    return true;
 }
