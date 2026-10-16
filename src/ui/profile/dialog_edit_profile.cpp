@@ -211,6 +211,7 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
             deleteLater();
             return;
         }
+        editLock.emplace(Engine::EditTarget::Profile, ent->id);
         type = ent->type;
         setRowVisible(ui->type_l, ui->type, false);
     }
@@ -385,8 +386,11 @@ void DialogEditProfile::accept() {
     QStringList args;
     if (newEnt) {
         if (!Configs::dataManager->profilesRepo->AddProfile(ent, groupId)) MessageBoxWarning("???", "id exists");
-    } else if (Configs::dataManager->profilesRepo->Save(ent) &&
-               (Configs::dataManager->settingsRepo->started_id == ent->id || Configs::RunningUsesProfile(ent->id))) {
+    } else if (!Configs::dataManager->profilesRepo->Save(ent)) {
+        MessageBoxWarning(software_name, tr("This profile was deleted while you were editing it."));
+        QDialog::reject();
+        return;
+    } else if (Configs::dataManager->settingsRepo->started_id == ent->id || Configs::RunningUsesProfile(ent->id)) {
         args << MwArg::RestartProxy;
     }
     if (!newEnt) Configs::RepositionLater(QList<std::shared_ptr<Configs::Profile>>{ent}, Configs::SortInput::Config);

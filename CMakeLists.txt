@@ -152,6 +152,8 @@ set(PROJECT_SOURCES
         include/api/remote/Router.hpp
         src/api/remote/Router.cpp
         src/api/remote/RouterTests.cpp
+        src/api/remote/RouterManage.cpp
+        src/api/remote/RouterBackup.cpp
 
         src/stats/traffic/TrafficLooper.cpp
         include/stats/traffic/TrafficLine.hpp
@@ -691,6 +693,21 @@ set(ENGINE_SOURCES
         src/engine/vpn/VpnEndpoints.cpp
         include/engine/headless/HeadlessPolicy.h
         src/engine/headless/HeadlessPolicy.cpp
+        include/engine/EditLocks.h
+        src/engine/EditLocks.cpp
+        include/engine/services/ServiceTypes.h
+        include/engine/services/ImportService.h
+        src/engine/services/ImportService.cpp
+        include/engine/services/GroupService.h
+        src/engine/services/GroupService.cpp
+        include/engine/services/ProfileService.h
+        src/engine/services/ProfileService.cpp
+        include/engine/services/SettingsRegistry.h
+        src/engine/services/SettingsRegistry.cpp
+        include/engine/services/BackupArchive.h
+        src/engine/services/BackupArchive.cpp
+        include/engine/services/AssetUpdates.h
+        src/engine/services/AssetUpdates.cpp
 )
 list(APPEND PROJECT_SOURCES ${ENGINE_SOURCES})
 

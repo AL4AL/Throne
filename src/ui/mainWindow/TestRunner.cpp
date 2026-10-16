@@ -212,7 +212,7 @@ void TestRunner::runUrlProbe(const Target& target) {
     }
 
     if (!rpcOK || result.results.empty()) {
-        if (!rpcOK) mw_->handleXrayGeoAssetError(coreError, contextName(target.entID));
+        if (!rpcOK) mw_->handleXrayGeoAssetError(coreError, contextName(target.entID), interactive_.load());
         return;
     }
 
@@ -278,7 +278,7 @@ void TestRunner::runIpProbe(const Target& target) {
     }
 
     if (!rpcOK || result.results.empty()) {
-        if (!rpcOK) mw_->handleXrayGeoAssetError(coreError, contextName(target.entID));
+        if (!rpcOK) mw_->handleXrayGeoAssetError(coreError, contextName(target.entID), interactive_.load());
         return;
     }
 
@@ -301,8 +301,8 @@ bool TestRunner::runUrlTests(const QList<int>& profileIDs, const std::function<v
     return runLatencyGroup(LatencyKind::Url, profileIDs, onFinished, false, interactive);
 }
 
-void TestRunner::queueUrlTests(const QList<int>& profileIDs, const std::function<void()>& onFinished) {
-    runOnNewThread([=, this] { runLatencyGroup(LatencyKind::Url, profileIDs, onFinished, true); });
+void TestRunner::queueUrlTests(const QList<int>& profileIDs, const std::function<void()>& onFinished, bool interactive) {
+    runOnNewThread([=, this] { runLatencyGroup(LatencyKind::Url, profileIDs, onFinished, true, interactive); });
 }
 
 bool TestRunner::runIpTests(const QList<int>& profileIDs, const std::function<void()>& onFinished, bool interactive) {
@@ -337,6 +337,7 @@ bool TestRunner::runLatencyGroup(LatencyKind kind, const QList<int>& requestedID
     sessionGen_.fetch_add(1);
     // Reset here, not on the worker: a stop() that lands before the worker runs must still count.
     stopRequested_.store(false);
+    interactive_.store(interactive);
 
     runOnNewThread([this, profileIDs, panelKind, isUrl, finish]() {
         mw_->dataViewHtmlGenerator_.seedLatencyTest(panelKind, profileIDs.size());
@@ -438,6 +439,7 @@ bool TestRunner::runSpeedTests(const QList<int>& requestedIDs, bool testCurrent,
     }
     sessionGen_.fetch_add(1);
     stopRequested_.store(false);
+    interactive_.store(interactive);
 
     testingCurrent_.store(testCurrent);
 
@@ -635,7 +637,7 @@ void TestRunner::runSpeedProbe(const Target& target)
     }
 
     if (!rpcOK || result.results.empty()) {
-        if (!rpcOK) mw_->handleXrayGeoAssetError(coreError, contextName(contextID));
+        if (!rpcOK) mw_->handleXrayGeoAssetError(coreError, contextName(contextID), interactive_.load());
         return;
     }
 

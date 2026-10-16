@@ -32,7 +32,7 @@ public:
     bool runUrlTests(const QList<int>& profileIDs, const std::function<void()>& onFinished = {}, bool interactive = true);
 
     // Waits out a running session instead of refusing it; returns at once and is safe from any thread.
-    void queueUrlTests(const QList<int>& profileIDs, const std::function<void()>& onFinished);
+    void queueUrlTests(const QList<int>& profileIDs, const std::function<void()>& onFinished, bool interactive = true);
 
     bool runIpTests(const QList<int>& profileIDs, const std::function<void()>& onFinished = {}, bool interactive = true);
 
@@ -100,6 +100,8 @@ private:
     std::atomic<quint64> sessionGen_ = 0;
     std::atomic<bool> stopRequested_ = false;
     std::atomic<bool> testingCurrent_ = false;
+    // The running session's flag: an unattended session never prompts for geo assets.
+    std::atomic<bool> interactive_ = true;
 
     // Tests bypass the clash tracker, so their bytes are counted only here, diffed per tag.
     QMutex creditMu_;

@@ -115,7 +115,7 @@ void MainWindow::on_commitDataRequest() {
     qDebug() << "End of data save";
 }
 
-void MainWindow::prepare_exit()
+void MainWindow::prepare_exit(bool interactive)
 {
     // Re-entry from a nested loop of the running teardown: mu_exit is not recursive, and the flag is set before any such loop.
     if (Configs::dataManager->settingsRepo->prepare_exit) return;
@@ -138,7 +138,7 @@ void MainWindow::prepare_exit()
     on_commitDataRequest();
     Scanner::ScanManager::instance()->StopAll(true);
     Configs::dataManager->settingsRepo->noSave = true; // don't change Configs::dataManager->settingsRepo after this line
-    profile_stop(false, true);
+    profile_stop(false, true, false, interactive);
 
     runOnThread([=, this]()
     {
@@ -155,9 +155,11 @@ void MainWindow::prepare_exit()
 
 void MainWindow::on_menu_exit_triggered() {
     // A teardown already running quits on its own; a second request would cut its nested waits short.
-    if (Configs::dataManager->settingsRepo->prepare_exit) return;
+    if (Configs::dataManager->settingsRepo->prepare_exit || m_exitInProgress) return;
+    m_exitInProgress = true;
     // A request made during the teardown below may overwrite exit_reason.
     const auto reason = exit_reason;
+    const bool unattended = m_exitUnattended;
     const bool restart = reason == ExitReason::Restart || reason == ExitReason::RestartWithTun ||
                          reason == ExitReason::RestartElevated;
     const auto program = QApplication::applicationFilePath();
@@ -170,20 +172,17 @@ void MainWindow::on_menu_exit_triggered() {
             arguments.removeAll("-flag_restart_tun_on");
         }
         if (reason == ExitReason::RestartWithTun) arguments << "-flag_restart_tun_on";
+        if (unattended && m_exitKeepTray) arguments << "-tray";
     }
 
     bool relaunched = false;
 #ifdef Q_OS_WIN
     if (reason == ExitReason::RestartWithTun || reason == ExitReason::RestartElevated) {
         // Asked before the teardown so a declined UAC prompt leaves this instance running; the new one waits for this pid to exit.
-        // The UAC wait pumps messages with the UI still live, so a second exit request must not launch a second instance.
-        static bool elevating = false;
-        if (elevating) return;
-        elevating = true;
         const auto elevatedArguments = arguments + QStringList{QString("-wait_pid=%1").arg(QCoreApplication::applicationPid())};
         const bool launched = WinCommander::runProcessElevated(program, elevatedArguments, QApplication::applicationDirPath(), 1, false) == 0;
-        elevating = false;
         if (!launched) {
+            m_exitInProgress = false;
             exit_reason = ExitReason::None;
             MW_show_log(tr("Restart as administrator was cancelled, Throne keeps running"));
             return;
@@ -192,7 +191,7 @@ void MainWindow::on_menu_exit_triggered() {
     }
 #endif
 
-    prepare_exit();
+    prepare_exit(!unattended);
     if (reason == ExitReason::RunUpdater) {
         QDir::setCurrent(QApplication::applicationDirPath());
 #ifdef Q_OS_WIN
@@ -208,6 +207,14 @@ void MainWindow::on_menu_exit_triggered() {
         QProcess::startDetached(program, arguments);
     }
     QCoreApplication::quit();
+}
+
+void MainWindow::request_unattended_exit(ExitReason reason) {
+    if (Configs::dataManager->settingsRepo->prepare_exit || m_exitInProgress) return;
+    m_exitUnattended = true;
+    m_exitKeepTray = isHidden();
+    exit_reason = reason;
+    on_menu_exit_triggered();
 }
 
 void MainWindow::toggle_system_proxy() {

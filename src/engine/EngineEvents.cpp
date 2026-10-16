@@ -39,4 +39,16 @@ namespace Engine {
     void EngineEvents::ExtraCoreExited() {
         emit instance()->extraCoreExited();
     }
+
+    void EngineEvents::GroupsChanged() {
+        emit instance()->groupsChanged();
+    }
+
+    void EngineEvents::ProfilesRemoved(const QList<int> &profileIds) {
+        emit instance()->profilesRemoved(profileIds);
+    }
+
+    void EngineEvents::SettingsChanged(const QStringList &keys) {
+        emit instance()->settingsChanged(keys);
+    }
 } // namespace Engine

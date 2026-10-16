@@ -49,6 +49,14 @@ namespace Engine {
         quint64 restartSerial = 0;
     };
 
+    // Why the running profile should restart to apply a change; the view translates it.
+    enum class RestartReason {
+        Settings,
+        Routing,
+        Profile,
+        Group,
+    };
+
     enum class ExitReason {
         None,
         RunUpdater,

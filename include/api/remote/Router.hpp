@@ -23,6 +23,11 @@ namespace Configs {
 
 namespace Engine {
     class EngineControl;
+    struct ServiceError;
+}
+
+namespace Subscription {
+    struct UpdateOutcome;
 }
 
 namespace RemoteApi {
@@ -81,9 +86,39 @@ namespace RemoteApi {
         void getLiveStats(const Request &request, const Responder &respond, int id);
         void getTrafficStats(const Request &request, const Responder &respond, int id);
 
+        // Management (RouterManage.cpp). dispatch() refuses the admin ones for a request without Request::admin.
+        void postImport(const Request &request, const Responder &respond, int id);
+        void postGroup(const Request &request, const Responder &respond, int id);
+        void postGroupUpdate(const Request &request, const Responder &respond, int id);
+        void postGroupsUpdate(const Request &request, const Responder &respond, int id);
+        void deleteGroup(const Request &request, const Responder &respond, int id);
+        void deleteProfiles(const Request &request, const Responder &respond, int id);
+        void getSettings(const Request &request, const Responder &respond, int id);
+        void putSettings(const Request &request, const Responder &respond, int id);
+        void postRuleSetsUpdate(const Request &request, const Responder &respond, int id);
+        void getGeoAssets(const Request &request, const Responder &respond, int id);
+        void postGeoAssetsUpdate(const Request &request, const Responder &respond, int id);
+        void postRestart(const Request &request, const Responder &respond, int id);
+        void postShutdown(const Request &request, const Responder &respond, int id);
+
+        // Backup and restore (RouterBackup.cpp).
+        void postBackup(const Request &request, const Responder &respond, int id);
+        void getBackup(const Request &request, const Responder &respond, int id);
+        void deleteBackup(const Request &request, const Responder &respond, int id);
+        void postRestore(const Request &request, const Responder &respond, int id);
+        void putRestore(const Request &request, const Responder &respond, int id);
+        void getRestore(const Request &request, const Responder &respond, int id);
+        void postRestoreApply(const Request &request, const Responder &respond, int id);
+        void deleteRestore(const Request &request, const Responder &respond, int id);
+
         static Response badRequest(const QString &message);
         static Response notFound(const QString &message);
         static Response noProfiles();
+        static Response forbidden();
+        // what: "Throne's settings window", "this group", ...
+        static Response editing(const QString &what);
+        static Response serviceError(const Engine::ServiceError &error);
+        static QJsonObject updateResultJson(const Subscription::UpdateOutcome &outcome);
 
         // The readers leave *out alone for a missing or null field, and fail with a bad_request in *error for a mistyped one.
         static bool bodyObject(const Request &request, bool required, QJsonObject *body, Response *error);
@@ -122,6 +157,10 @@ namespace RemoteApi {
         void startBestCandidate(const QList<int> &candidates, qint64 requestedAt, qint64 maxAge, bool restart, const WaiterPtr &waiter);
         void finishJob(int jobId, bool stopped);
         std::shared_ptr<Job> findJob(int jobId) const;
+        // Runs then() on the main thread once the running profile is out of the way: at once unless stopRunning and a
+        // profile runs, else after an unattended, non-blocking stop finished. Returns busy instead while a start or stop
+        // is in flight. then() runs even when the request's waiter has already timed out.
+        std::optional<Response> afterStop(bool stopRunning, const std::function<void()> &then);
 
         Engine::EngineControl *engine_;
         // Keyed by StartRequest serial; called once, with no failure when the profile started.
@@ -132,5 +171,14 @@ namespace RemoteApi {
         // Newest first.
         QList<std::shared_ptr<Job>> jobs_;
         int lastJobId_ = 0;
+
+        // A backup kept for download, or an archive being uploaded for a restore; defined in RouterBackup.cpp.
+        struct Transfer;
+        QList<std::shared_ptr<Transfer>> backups_;
+        QList<std::shared_ptr<Transfer>> restores_;
+        int lastTransferId_ = 0;
+        QTimer *transferSweep_ = nullptr;
+        // A restore was applied and the restart is queued: every request is answered 503 restarting.
+        bool restarting_ = false;
     };
 }

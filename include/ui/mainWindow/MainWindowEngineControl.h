@@ -42,6 +42,13 @@ public:
 
     void stopTests() override;
 
+    void noteRestartNeeded(Engine::RestartReason reason) override;
+
+    bool restartPending() const override;
+
+    bool requestExit(Engine::ExitReason reason) override;
+
 private:
     MainWindow *mw_;
+    bool exitQueued_ = false;
 };

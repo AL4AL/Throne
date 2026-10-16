@@ -109,6 +109,16 @@ namespace Configs {
         return admin;
     }
 
+    std::optional<bool> KnownAdmin() {
+        if (isAdminCache >= 0) return isAdminCache != 0;
+#ifdef Q_OS_WIN
+        // Local and cheap; unlike IsAdmin it leaves windows_set_admin alone.
+        return Windows_IsInAdmin();
+#else
+        return std::nullopt;
+#endif
+    }
+
     namespace {
         QString basePathOverride;
     } // namespace

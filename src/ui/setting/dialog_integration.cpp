@@ -139,6 +139,7 @@ void DialogIntegration::setupApiTab()
     ui->api_listen->setCurrentIndex(settings->remote_api_lan ? 1 : 0);
     ui->api_port->setValue(IsValidPort(settings->remote_api_port) ? settings->remote_api_port : RemoteApi::kDefaultPort);
     ui->api_allow->setText(settings->remote_api_allow);
+    ui->api_admin_lan->setChecked(settings->remote_api_admin_lan);
     ui->api_key->setText(savedApiKey);
     if (ui->api_enable->isChecked() && savedApiKey.isEmpty()) ui->api_key->setText(RemoteApi::KeyToText(RemoteApi::GenerateKey()));
     ui->api_help->setText(tr("Scripts connect with thronectl or the Throne API library.").toHtmlEscaped()
@@ -172,6 +173,7 @@ void DialogIntegration::updateApiControls()
     }
     ui->api_allow_l->setEnabled(enabled && lan);
     ui->api_allow->setEnabled(enabled && lan);
+    ui->api_admin_lan->setEnabled(enabled && lan);
     ui->api_lan_warning->setVisible(enabled && lan);
 }
 
@@ -218,13 +220,16 @@ void DialogIntegration::accept()
     const int apiPort = ui->api_port->value();
     const auto apiKey = ui->api_key->text();
     const auto apiAllow = ui->api_allow->text().trimmed();
+    const bool apiAdminLan = ui->api_admin_lan->isChecked();
     const bool apiChanged = apiEnable != settings->remote_api_enable || apiLan != settings->remote_api_lan || apiPort != settings->remote_api_port
-                            || apiKey != settings->remote_api_key || apiAllow != settings->remote_api_allow;
+                            || apiKey != settings->remote_api_key || apiAllow != settings->remote_api_allow
+                            || apiAdminLan != settings->remote_api_admin_lan;
     settings->remote_api_enable = apiEnable;
     settings->remote_api_lan = apiLan;
     settings->remote_api_port = apiPort;
     settings->remote_api_key = apiKey;
     settings->remote_api_allow = apiAllow;
+    settings->remote_api_admin_lan = apiAdminLan;
     settings->Save();
 
     MW_dialog_message(MwMessage::UpdateShortcuts, {});

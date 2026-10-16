@@ -210,6 +210,26 @@ Release note:
         <source>Other outbounds</source>
         <translation>خروجی‌های دیگر</translation>
     </message>
+    <message>
+        <source>Download stalled: no data arrived for %1 seconds.</source>
+        <translation>دانلود متوقف شد: به مدت %1 ثانیه داده‌ای دریافت نشد.</translation>
+    </message>
+    <message>
+        <source>Throne needs at least one group.</source>
+        <translation>Throne دست‌کم به یک گروه نیاز دارد.</translation>
+    </message>
+    <message>
+        <source>This group&apos;s subscription is being updated. Try again when it finishes.</source>
+        <translation>اشتراک این گروه در حال به‌روزرسانی است. پس از پایان آن دوباره تلاش کنید.</translation>
+    </message>
+    <message>
+        <source>Close the editor of this group or of one of its profiles first.</source>
+        <translation>ابتدا ویرایشگر این گروه یا یکی از پروفایل‌های آن را ببندید.</translation>
+    </message>
+    <message>
+        <source>This group no longer exists.</source>
+        <translation>این گروه دیگر وجود ندارد.</translation>
+    </message>
 </context>
 <context>
     <name>DialogBasicSettings</name>
@@ -565,6 +585,26 @@ Release note:
     <message>
         <source>Image Files (*.png)</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A geo asset download is already running.</source>
+        <translation>دانلود داده‌های جغرافیایی در حال انجام است.</translation>
+    </message>
+    <message>
+        <source>The backup file is damaged or incomplete.</source>
+        <translation>فایل پشتیبان آسیب دیده یا ناقص است.</translation>
+    </message>
+    <message>
+        <source>There is nothing to back up</source>
+        <translation>چیزی برای پشتیبان‌گیری وجود ندارد</translation>
+    </message>
+    <message>
+        <source>A subscription update is running; try again when it finishes.</source>
+        <translation>به‌روزرسانی اشتراک در حال انجام است؛ پس از پایان آن دوباره تلاش کنید.</translation>
+    </message>
+    <message>
+        <source>The backup&apos;s database is damaged: %1</source>
+        <translation>پایگاه دادهٔ پشتیبان آسیب دیده است: %1</translation>
     </message>
 </context>
 <context>
@@ -928,6 +968,10 @@ Release note:
         <source>Reality short id. Accept only one value.</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>This profile was deleted while you were editing it.</source>
+        <translation>این پروفایل در حین ویرایش شما حذف شد.</translation>
+    </message>
 </context>
 <context>
     <name>DialogIntegration</name>
@@ -962,6 +1006,14 @@ Release note:
     <message>
         <source>Shortcuts</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow management from the local network</source>
+        <translation>اجازهٔ مدیریت از شبکهٔ محلی</translation>
+    </message>
+    <message>
+        <source>Lets devices on the local network import, delete, change settings, back up and restore through the Throne API. This device can always do so.</source>
+        <translation>به دستگاه‌های شبکهٔ محلی اجازه می‌دهد از طریق Throne API وارد کنند، حذف کنند، تنظیمات را تغییر دهند، پشتیبان بگیرند و بازیابی کنند. این دستگاه همیشه می‌تواند این کارها را انجام دهد.</translation>
     </message>
 </context>
 <context>
@@ -1977,6 +2029,10 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <source>Remove %1?</source>
         <translation>حذف %1?</translation>
     </message>
+    <message>
+        <source>This group was deleted while you were editing it.</source>
+        <translation>این گروه در حین ویرایش شما حذف شد.</translation>
+    </message>
 </context>
 <context>
     <name>JsonEditor</name>
@@ -2696,6 +2752,22 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     <message>
         <source>Open Traffic Statistics…</source>
         <translation>باز کردن آمار ترافیک…</translation>
+    </message>
+    <message>
+        <source>This group was deleted while you were editing it.</source>
+        <translation>این گروه در حین ویرایش شما حذف شد.</translation>
+    </message>
+    <message>
+        <source>The Xray config &quot;%1&quot; needs &quot;%2&quot;, but the installed %3 does not contain it.</source>
+        <translation>پیکربندی Xray «%1» به «%2» نیاز دارد، اما %3 نصب‌شده آن را ندارد.</translation>
+    </message>
+    <message>
+        <source>The Xray config &quot;%1&quot; needs geo data files that are not installed: %2. Download them under Basic Settings &gt; Miscellaneous &gt; Xray Geo Assets.</source>
+        <translation>پیکربندی Xray «%1» به فایل‌های دادهٔ جغرافیایی نصب‌نشده نیاز دارد: %2. آن‌ها را از «تنظیمات پایه &gt; متفرقه &gt; داده‌های جغرافیایی Xray» دانلود کنید.</translation>
+    </message>
+    <message>
+        <source>Geo asset files are already being downloaded.</source>
+        <translation>فایل‌های داده‌های جغرافیایی در حال دانلود هستند.</translation>
     </message>
 </context>
 <context>

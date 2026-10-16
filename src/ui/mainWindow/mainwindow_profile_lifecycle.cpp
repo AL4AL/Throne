@@ -11,8 +11,6 @@
 #include "include/ui/widget/LiveChart.h"
 
 #include <QJsonDocument>
-#include <QFile>
-#include <QRegularExpression>
 
 #include "include/configs/generate.h"
 #include "include/configs/common/xrayStreamSetting.h"
@@ -20,6 +18,7 @@
 #include "include/database/OtpProfilesRepo.h"
 #include "include/database/ProfilesRepo.h"
 #include "include/engine/ThreadCheck.h"
+#include "include/engine/services/AssetUpdates.h"
 #include "include/global/OtpPlaceholder.hpp"
 #include "include/global/RunningProfiles.hpp"
 #include "include/global/VpnCredentialOverride.hpp"
@@ -72,59 +71,55 @@ int MainWindow::get_profile_to_start() {
 }
 
 bool MainWindow::handleXrayGeoAssetError(const QString& error, const QString& contextName, bool prompt) {
-    const bool refGeoip = error.contains("geoip.dat");
-    const bool refGeosite = error.contains("geosite.dat");
-    if (!refGeoip && !refGeosite) return false;
-    if (!prompt) return true;
+    const auto classified = Engine::AssetUpdates::ClassifyGeoError(error);
+    if (!classified.isGeo) return false;
+    if (!prompt) {
+        if (classified.missingCategory) {
+            const QString needed = classified.needed.isEmpty() ? tr("a required category") : classified.needed;
+            MW_show_log(tr("The Xray config \"%1\" needs \"%2\", but the installed %3 does not contain it.")
+                            .arg(contextName, needed, classified.whichFile));
+        } else {
+            QStringList missing;
+            if (classified.refGeoip) missing << QStringLiteral("geoip.dat");
+            if (classified.refGeosite) missing << QStringLiteral("geosite.dat");
+            MW_show_log(tr("The Xray config \"%1\" needs geo data files that are not installed: %2. Download them under Basic Settings > Miscellaneous > Xray Geo Assets.")
+                            .arg(contextName, missing.join(QStringLiteral(", "))));
+        }
+        return true;
+    }
 
     runOnUiThread([=, this] {
-        if (m_xrayGeoAssetBusy) return;
+        if (m_xrayGeoAssetBusy || Engine::AssetUpdates::GeoUpdateRunning()) return;
         m_xrayGeoAssetBusy = true;
         setTimeout([=, this] {
-            const QString base = Configs::GetBasePath();
-            const bool haveGeoip = QFile::exists(base + "/geoip.dat");
-            const bool haveGeosite = QFile::exists(base + "/geosite.dat");
-
-            const bool geoipLacksCategory = refGeoip && haveGeoip;
-            const bool geositeLacksCategory = refGeosite && haveGeosite;
-            if (geoipLacksCategory || geositeLacksCategory) {
-                const QString whichFile = geositeLacksCategory ? "geosite.dat" : "geoip.dat";
-                const QString ruleType = geositeLacksCategory ? "geosite" : "geoip";
-
-                QString category;
-                QRegularExpression re(QStringLiteral("code\\s+(\\S+)\\s+from"));
-                const auto m = re.match(error);
-                if (m.hasMatch()) category = m.captured(1);
-                const QString needed = category.isEmpty()
-                    ? tr("a required category")
-                    : QStringLiteral("%1:%2").arg(ruleType, category);
-
-                policy()->geoAssetMissingCategory(contextName, needed, whichFile);
+            const auto geo = Engine::AssetUpdates::ClassifyGeoError(error);
+            if (geo.missingCategory) {
+                const QString needed = geo.needed.isEmpty() ? tr("a required category") : geo.needed;
+                policy()->geoAssetMissingCategory(contextName, needed, geo.whichFile);
                 m_xrayGeoAssetBusy = false;
                 return;
             }
 
-            if (!policy()->confirmGeoAssetDownload(contextName)) {
-                m_xrayGeoAssetBusy = false;
-                return;
-            }
+            const bool confirmed = policy()->confirmGeoAssetDownload(contextName);
+            m_xrayGeoAssetBusy = false;
+            if (!confirmed) return;
 
-            runOnNewThread([=, this] {
+            Engine::AssetUpdates::GeoRequest request;
+            request.files.clear();
+            for (const auto &status : Engine::AssetUpdates::GeoStatus()) {
+                if (!status.present) request.files << status.file;
+            }
+            request.onlyMissing = true;
+            const bool started = Engine::AssetUpdates::UpdateGeoAssets(request, [this](const QList<Engine::AssetUpdates::GeoFileResult> &results) {
                 QString dlErr;
-                if (!haveGeoip) {
-                    auto e = NetworkRequestHelper::DownloadAsset(Configs::dataManager->settingsRepo->xray_geoip_url, "geoip.dat");
-                    if (!e.isEmpty()) dlErr += "geoip.dat: " + e + "\n";
+                for (const auto &result : results) {
+                    if (!result.error.isEmpty()) dlErr += result.fileName + ": " + result.error + "\n";
                 }
-                if (!haveGeosite) {
-                    auto e = NetworkRequestHelper::DownloadAsset(Configs::dataManager->settingsRepo->xray_geosite_url, "geosite.dat");
-                    if (!e.isEmpty()) dlErr += "geosite.dat: " + e + "\n";
-                }
-                runOnUiThread([=, this] {
-                    m_xrayGeoAssetBusy = false;
-                    if (dlErr.isEmpty()) MW_show_log(tr("Downloaded Xray geo asset files."));
-                    policy()->geoAssetDownloadFinished(dlErr);
-                });
+                if (dlErr.isEmpty()) MW_show_log(tr("Downloaded Xray geo asset files."));
+                policy()->geoAssetDownloadFinished(dlErr);
             });
+            // An API request may have started a download while the question was open.
+            if (!started) MW_show_log(tr("Geo asset files are already being downloaded."));
         }, this, 300);
     });
     return true;

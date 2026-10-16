@@ -17,7 +17,7 @@ namespace Engine::Lifecycle {
         lifecycleStopHandler = std::move(handler);
     }
 
-    void StopRunningProfile(bool crash, bool block, bool manual) {
+    void StopRunningProfile(bool crash, bool block, bool manual, bool interactive) {
         StopHandler handler;
         {
             QMutexLocker locker(&lifecycleStopMutex);
@@ -27,6 +27,6 @@ namespace Engine::Lifecycle {
             LOG_WARN("StopRunningProfile ignored: no lifecycle handler");
             return;
         }
-        handler(crash, block, manual);
+        handler(crash, block, manual, interactive);
     }
 } // namespace Engine::Lifecycle

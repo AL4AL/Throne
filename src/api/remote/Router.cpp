@@ -18,7 +18,9 @@
 #include "include/database/ProfilesRepo.h"
 #include "include/database/RoutesRepo.h"
 #include "include/database/TrafficStatsRepo.h"
+#include "include/engine/EditLocks.h"
 #include "include/engine/EngineControl.h"
+#include "include/engine/services/ServiceTypes.h"
 #include "include/global/Configs.hpp"
 #include "include/stats/traffic/TrafficStatsManager.hpp"
 #include "include/sys/KillSwitch.hpp"
@@ -91,6 +93,24 @@ namespace RemoteApi::RouterImpl {
         return QStringLiteral("off");
     }
 
+    // Optimistic until the guard has run once: only a failed arm tells that this system cannot support it.
+    bool killSwitchSupported() {
+#if defined(Q_OS_WIN) || defined(Q_OS_LINUX) || defined(Q_OS_MACOS)
+        return Sys::KillSwitch::instance()->failureCode() != QStringLiteral("unsupported");
+#else
+        return false;
+#endif
+    }
+
+    QJsonValue degradedReason() {
+        const auto &settings = Configs::dataManager->settingsRepo;
+        if (!settings->core_running) return QStringLiteral("core_unavailable");
+        if (settings->kill_switch && Sys::KillSwitch::instance()->state() == Sys::KillSwitch::State::Failed) {
+            return QStringLiteral("kill_switch_failed");
+        }
+        return QJsonValue();
+    }
+
     Response busyConnection() {
         return Response::Error(409, QStringLiteral("busy"), QStringLiteral("A profile is starting or stopping"));
     }
@@ -154,6 +174,8 @@ namespace RemoteApi {
             const char *method;
             const char *path;
             Handler handler;
+            // Management: refused unless Request::admin.
+            bool admin = false;
         };
         static const Endpoint endpoints[] = {
             {"GET", "/v1/status", &Router::getStatus},
@@ -172,17 +194,48 @@ namespace RemoteApi {
             {"DELETE", "/v1/results", &Router::deleteResults},
             {"GET", "/v1/stats/live", &Router::getLiveStats},
             {"GET", "/v1/stats/traffic", &Router::getTrafficStats},
+            {"POST", "/v1/import", &Router::postImport, true},
+            {"POST", "/v1/groups", &Router::postGroup, true},
+            {"POST", "/v1/groups/update", &Router::postGroupsUpdate},
+            {"POST", "/v1/groups/{id}/update", &Router::postGroupUpdate},
+            {"DELETE", "/v1/groups/{id}", &Router::deleteGroup, true},
+            {"DELETE", "/v1/profiles", &Router::deleteProfiles, true},
+            {"GET", "/v1/settings", &Router::getSettings},
+            {"PUT", "/v1/settings", &Router::putSettings, true},
+            {"POST", "/v1/backups", &Router::postBackup, true},
+            {"GET", "/v1/backups/{id}", &Router::getBackup, true},
+            {"DELETE", "/v1/backups/{id}", &Router::deleteBackup, true},
+            {"POST", "/v1/restores", &Router::postRestore, true},
+            {"PUT", "/v1/restores/{id}", &Router::putRestore, true},
+            {"GET", "/v1/restores/{id}", &Router::getRestore, true},
+            {"DELETE", "/v1/restores/{id}", &Router::deleteRestore, true},
+            {"POST", "/v1/restores/{id}/apply", &Router::postRestoreApply, true},
+            {"POST", "/v1/rule-sets/update", &Router::postRuleSetsUpdate},
+            {"GET", "/v1/geo-assets", &Router::getGeoAssets},
+            {"POST", "/v1/geo-assets/update", &Router::postGeoAssetsUpdate},
+            {"POST", "/v1/restart", &Router::postRestart, true},
+            {"POST", "/v1/shutdown", &Router::postShutdown, true},
         };
 
+        const auto &settings = Configs::dataManager->settingsRepo;
+        // A restore from the window sets noSave and restarts afterwards; until then the repos still cache what it replaced.
+        if (restarting_ || (settings->noSave && !settings->prepare_exit)) {
+            respond(Response::Error(503, QStringLiteral("restarting"), QStringLiteral("Throne is restarting")));
+            return;
+        }
         bool knownPath = false;
         for (const auto &endpoint : endpoints) {
             int id = -1;
             if (!RouterImpl::matchPath(QString::fromLatin1(endpoint.path), request.path, &id)) continue;
             knownPath = true;
             if (request.method != QLatin1String(endpoint.method)) continue;
+            if (endpoint.admin && !request.admin) {
+                respond(forbidden());
+                return;
+            }
             if (request.method != QLatin1String("GET")) {
                 MW_show_log(tr("[API] %1 %2 from %3").arg(request.method, request.path, request.peer));
-                if (Configs::dataManager->settingsRepo->prepare_exit) {
+                if (settings->prepare_exit) {
                     respond(Response::Error(503, QStringLiteral("exiting"), QStringLiteral("Throne is shutting down")));
                     return;
                 }
@@ -208,6 +261,24 @@ namespace RemoteApi {
 
     Response Router::noProfiles() {
         return Response::Error(400, QStringLiteral("no_profiles"), QStringLiteral("The selection matched no profile"));
+    }
+
+    Response Router::forbidden() {
+        return Response::Error(403, QStringLiteral("forbidden"),
+                               QStringLiteral("Management requests are accepted only from this device. Allow management from the local "
+                                              "network in Throne's Throne API settings to accept them from the LAN."));
+    }
+
+    Response Router::editing(const QString &what) {
+        auto subject = what;
+        if (!subject.isEmpty()) subject[0] = subject[0].toUpper();
+        return Response::Error(409, QStringLiteral("editing"),
+                               QStringLiteral("%1 is open in an editor in Throne's window; close it and try again").arg(subject));
+    }
+
+    Response Router::serviceError(const Engine::ServiceError &error) {
+        if (error.code.isEmpty()) return Response::Error(500, QStringLiteral("internal"), error.message);
+        return Response::Error(error.status, error.code, error.message);
     }
 
     bool Router::bodyObject(const Request &request, bool required, QJsonObject *body, Response *error) {
@@ -394,6 +465,13 @@ namespace RemoteApi {
                 {"address", settings->inbound_address},
                 {"port", settings->inbound_socks_port},
             }},
+            {"capabilities", QJsonObject{
+                {"tun", Configs::KnownAdmin().value_or(false) || settings->disable_privilege_req},
+                {"kill_switch", RouterImpl::killSwitchSupported()},
+                {"headless", !IsGuiApp()},
+            }},
+            {"restart_needed", engine_->restartPending()},
+            {"degraded", RouterImpl::degradedReason()},
             {"version", QStringLiteral(NKR_VERSION)},
         };
     }
@@ -826,6 +904,11 @@ namespace RemoteApi {
         }
         if (Configs::dataManager->settingsRepo->current_route_id == *routeId) {
             respond(Response::Ok(statusJson()));
+            return;
+        }
+        // The editor writes current_route_id back on OK.
+        if (Engine::IsBeingEdited(Engine::EditTarget::Routes)) {
+            respond(editing(QStringLiteral("the routing profile list")));
             return;
         }
         if (connectionBusy()) {

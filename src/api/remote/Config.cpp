@@ -10,6 +10,7 @@ namespace RemoteApi {
         Config config;
         config.enabled = settings->remote_api_enable;
         config.lan = settings->remote_api_lan;
+        config.adminLan = settings->remote_api_admin_lan;
         if (settings->remote_api_port >= 1 && settings->remote_api_port <= 65535) config.port = quint16(settings->remote_api_port);
         config.key = KeyFromText(settings->remote_api_key);
 

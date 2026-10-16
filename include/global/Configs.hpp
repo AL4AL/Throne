@@ -5,6 +5,7 @@
 #include "include/database/DatabaseManager.h"
 
 #include <array>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -14,6 +15,9 @@ namespace Configs {
     QString FindCoreRealPath();
 
     bool IsAdmin(bool forceRenew=false);
+
+    // The cached IsAdmin answer without an RPC or side effects; empty while unknown. Main thread.
+    std::optional<bool> KnownAdmin();
 
     bool isSetuidSet(const std::string& path);
 

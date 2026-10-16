@@ -2,8 +2,10 @@
 
 #include <QDialog>
 #include <QHash>
+#include <optional>
 #include "ui_dialog_edit_group.h"
 #include "include/database/entities/Group.h"
+#include "include/engine/EditLocks.h"
 
 class QComboBox;
 
@@ -32,6 +34,8 @@ private:
     Ui::DialogEditGroup *ui;
 
     std::shared_ptr<Configs::Group> ent;
+
+    std::optional<Engine::EditLock> editLock;
 
     struct {
         int front_proxy;

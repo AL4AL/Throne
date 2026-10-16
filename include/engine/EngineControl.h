@@ -61,6 +61,15 @@ namespace Engine {
         // Blocks until the session winds down; never call it on the main thread.
         virtual void stopTests() = 0;
 
+        // A no-op while nothing runs.
+        virtual void noteRestartNeeded(RestartReason reason) = 0;
+
+        virtual bool restartPending() const = 0;
+
+        // Queued: returns at once and the exit runs later from the event loop, unattended. Accepts only None (shut down) and
+        // Restart; false when an exit is already running.
+        virtual bool requestExit(ExitReason reason) = 0;
+
     signals:
         void startFinished(quint64 serial, int profileId, Engine::StartOutcome outcome, const QString &error);
 

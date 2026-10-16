@@ -22,6 +22,8 @@ namespace RemoteApi {
         QByteArray key;
         // Applies only with lan; empty allows every address.
         QList<QPair<QHostAddress, int>> allow;
+        // LAN peers may use the management endpoints; loopback peers always may.
+        bool adminLan = false;
     };
 
     // Reads the remote_api_* settings. UI thread only.

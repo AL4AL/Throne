@@ -10,6 +10,8 @@
 #include <utility>
 #include <type_traits>
 
+#include <QStringList>
+
 #include "include/global/Utils.hpp"
 
 namespace Configs {
@@ -108,7 +110,7 @@ namespace Configs {
 
         [[nodiscard]] const std::string& Path() const { return path_; }
 
-        // Transactions span the connection: hold this to write, or to read rows a writer may be replacing.
+        // Transactions span the connection: hold this to write, or to read rows a writer may be replacing. Take it after repo locks.
         std::recursive_mutex& WriteMutex() { return writeMutex_; }
 
     private:
@@ -242,7 +244,7 @@ namespace Configs {
             }
         }
 
-        // BEGIN IMMEDIATE .. COMMIT; body returning false rolls back quietly, a throw rolls back and is reported as op.
+        // BEGIN IMMEDIATE .. COMMIT under WriteMutex(); body returning false rolls back quietly, a throw rolls back and is reported as op.
         bool transaction(const std::string& op, const std::function<bool()>& body);
 
         template<typename... Args>
@@ -268,6 +270,9 @@ namespace Configs {
                 NotifyError("execDeleteByIdIn for " + table, e);
             }
         }
+
+        // Throws instead of swallowing, so a caller's explicit transaction aborts as one unit.
+        void execDeleteByIdInThrow(const std::string& table, const std::string& idColumn, const std::vector<int>& ids);
 
         void execBatchSettingsReplace(const std::vector<std::pair<std::string, std::string>>& keyValues) {
             try {
@@ -312,6 +317,7 @@ namespace Configs {
 
         // Only columns present in both schemas are copied, so cross-version backups still restore; a route rule with data
         // in a column this schema lacks is skipped instead. Returns the number of skipped route rules. Throws on failure.
-        int restoreSelective(const std::string& srcPath, const BackupParts& parts);
+        // preservedSettingKeys (DB key names) keep this database's values when settings are restored.
+        int restoreSelective(const std::string& srcPath, const BackupParts& parts, const QStringList& preservedSettingKeys = {});
     };
 }

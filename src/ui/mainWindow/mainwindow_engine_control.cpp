@@ -75,9 +75,37 @@ bool MainWindowEngineControl::runTests(Engine::TestKind kind, const QList<int> &
 }
 
 void MainWindowEngineControl::queueUrlTests(const QList<int> &profileIds, const std::function<void()> &onFinished) {
-    mw_->testRunner->queueUrlTests(profileIds, onFinished);
+    mw_->testRunner->queueUrlTests(profileIds, onFinished, false);
 }
 
 void MainWindowEngineControl::stopTests() {
     mw_->testRunner->stop();
+}
+
+void MainWindowEngineControl::noteRestartNeeded(Engine::RestartReason reason) {
+    QString text;
+    switch (reason) {
+        case Engine::RestartReason::Settings: text = MainWindow::tr("Settings"); break;
+        case Engine::RestartReason::Routing: text = MainWindow::tr("Routing"); break;
+        case Engine::RestartReason::Profile: text = MainWindow::tr("Profile"); break;
+        case Engine::RestartReason::Group: text = MainWindow::tr("Group"); break;
+    }
+    mw_->noteRestartNeeded(text);
+}
+
+bool MainWindowEngineControl::restartPending() const {
+    return !mw_->pendingRestartReasons().isEmpty();
+}
+
+bool MainWindowEngineControl::requestExit(Engine::ExitReason reason) {
+    if (reason != Engine::ExitReason::None && reason != Engine::ExitReason::Restart) return false;
+    if (exitQueued_ || mw_->m_exitInProgress || Configs::dataManager->settingsRepo->prepare_exit) return false;
+    exitQueued_ = true;
+    // Queued so the caller replies before the teardown shuts the API server down.
+    QMetaObject::invokeMethod(mw_, [this, reason] {
+        mw_->request_unattended_exit(reason);
+        // Turned away by a window exit waiting on UAC: once that one is declined, a new request may run.
+        if (!Configs::dataManager->settingsRepo->prepare_exit) exitQueued_ = false;
+    }, Qt::QueuedConnection);
+    return true;
 }

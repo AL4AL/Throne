@@ -26,6 +26,9 @@ namespace RemoteApi {
 
         void apply(const Config &config);
 
+        // Stops listening and gives replies still in the write buffers up to kDrainMs in total to leave.
+        void drain();
+
     private:
         struct Mailbox {
             QMutex mutex;
@@ -81,6 +84,7 @@ namespace RemoteApi {
         static constexpr qint64 kPeerLogIntervalMs = 60 * 1000;
         static constexpr int kMaxTrackedPeers = 1024;
         static constexpr qint64 kReadBufferSize = 64 * 1024;
+        static constexpr qint64 kDrainMs = 1000;
 
         static void Log(const QString &line);
 
@@ -203,6 +207,19 @@ namespace RemoteApi {
                                      : Server::tr("Listening on %1:%2").arg(QStringLiteral("127.0.0.1")).arg(config.port);
         Log(text);
         server_->publishStatus(text);
+    }
+
+    void Server::Worker::drain() {
+        stopListening();
+        QElapsedTimer elapsed;
+        elapsed.start();
+        const auto open = connections_.values();
+        for (auto *conn : open) {
+            while (!conn->closed && conn->socket->bytesToWrite() > 0 && elapsed.elapsed() < kDrainMs) {
+                if (!conn->socket->waitForBytesWritten(static_cast<int>(kDrainMs - elapsed.elapsed()))) break;
+            }
+        }
+        closeAll();
     }
 
     void Server::Worker::stopListening() {
@@ -332,6 +349,7 @@ namespace RemoteApi {
             return;
         }
         request.peer = conn->peer;
+        request.admin = conn->address.isLoopback() || config_.adminLan;
         conn->phase = Phase::Pending;
         conn->timer->stop();
         auto exchange = std::make_shared<Exchange>();
@@ -449,6 +467,8 @@ namespace RemoteApi {
         if (stopped_) return;
         stopped_ = true;
         if (thread_ != nullptr) {
+            // A reply posted before this call is written first, since the worker handles its queue in order.
+            if (thread_->isRunning()) QMetaObject::invokeMethod(worker_, [worker = worker_] { worker->drain(); }, Qt::BlockingQueuedConnection);
             thread_->quit();
             thread_->wait();
             worker_ = nullptr;

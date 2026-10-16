@@ -119,7 +119,8 @@ public:
 
     static QString liveVpnStateText(bool *connected = nullptr);
 
-    void prepare_exit();
+    // interactive false: a failing or slow stop of the running profile is logged, never shown.
+    void prepare_exit(bool interactive = true);
 
     void refresh_proxy_list(const QList<int> &ids = {}, bool mayNeedReset = false,
                             RefreshAnchor anchor = RefreshAnchor::KeepPlace);
@@ -326,7 +327,6 @@ private:
     ConnectionState m_lastConnectionState = ConnectionState::Idle;
     quint64 m_startSerial = 0;
     bool m_xrayGeoAssetBusy = false;
-    bool m_ruleSetUpdateBusy = false;
     QString traffic_update_cache;
     qint64 last_test_time = 0;
     bool select_mode = false;
@@ -334,6 +334,11 @@ private:
     QMutex mu_stopping;
     QMutex mu_exit;
     ExitReason exit_reason = ExitReason::None;
+    // Set by request_unattended_exit: no dialog during the teardown, and a restart stays in the tray when the window was hidden.
+    bool m_exitUnattended = false;
+    bool m_exitKeepTray = false;
+    // From the start of on_menu_exit_triggered; its UAC wait pumps messages, so nested exit requests must back off.
+    bool m_exitInProgress = false;
     QMutex mu_download_update;
     QMutex mu_download_dashboard;
     class ConnectionsTreeModel *connectionsModel = nullptr;
@@ -468,6 +473,11 @@ private:
 
     // Returns whether it restarted the profile.
     bool choose_route(int routeId, bool interactive = true, quint64 restartSerial = 0);
+
+    void request_unattended_exit(ExitReason reason);
+
+    // Runs after the user confirmed; title heads the warning when Engine::GroupService refuses.
+    void delete_group(int gid, const QString &title);
 
     void dialog_message_impl(MwMessage cmd, const QStringList &args);
 
