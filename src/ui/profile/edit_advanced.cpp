@@ -1,6 +1,6 @@
 #include "include/ui/profile/edit_advanced.h"
 
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 
 #include <QGuiApplication>
 #include <QInputDialog>

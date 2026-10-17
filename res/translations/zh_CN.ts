@@ -1321,6 +1321,26 @@ Throne will restart to complete the restore.</source>
         <source>Backup restored successfully. Throne will now restart for the changes to take effect.</source>
         <translation>备份成功恢复。 Throne 现在将要重启以使得更改生效。</translation>
     </message>
+    <message>
+        <source>A geo asset download is already running.</source>
+        <translation>地理资源下载已在进行中。</translation>
+    </message>
+    <message>
+        <source>The backup file is damaged or incomplete.</source>
+        <translation>备份文件已损坏或不完整。</translation>
+    </message>
+    <message>
+        <source>There is nothing to back up</source>
+        <translation>没有可备份的内容</translation>
+    </message>
+    <message>
+        <source>A subscription update is running; try again when it finishes.</source>
+        <translation>正在更新订阅；请在完成后重试。</translation>
+    </message>
+    <message>
+        <source>The backup&apos;s database is damaged: %1</source>
+        <translation>备份中的数据库已损坏：%1</translation>
+    </message>
 </context>
 <context>
     <name>DialogEditGroup</name>
@@ -2540,6 +2560,10 @@ Throne will restart to complete the restore.</source>
         <source>XHTTP maxConnections cannot be specified together with maxConcurrency.</source>
         <translation>XHTTP 中 maxConnections 不能与 maxConcurrency 同时指定。</translation>
     </message>
+    <message>
+        <source>This profile was deleted while you were editing it.</source>
+        <translation>此配置在您编辑时已被删除。</translation>
+    </message>
 </context>
 <context>
     <name>DialogEndpointDetails</name>
@@ -2671,6 +2695,14 @@ Throne will restart to complete the restore.</source>
         <location filename="Throne-1.3.1/include/ui/setting/dialog_integration.ui" line="96"/>
         <source>Shortcuts</source>
         <translation>快捷键</translation>
+    </message>
+    <message>
+        <source>Allow management from the local network</source>
+        <translation>允许从局域网进行管理</translation>
+    </message>
+    <message>
+        <source>Lets devices on the local network import, delete, change settings, back up and restore through the Throne API. This device can always do so.</source>
+        <translation>允许局域网中的设备通过 Throne API 导入、删除、更改设置、备份和恢复。本设备始终可以执行这些操作。</translation>
     </message>
 </context>
 <context>
@@ -8026,6 +8058,10 @@ Improves hole-punching reliability. Requires IPv4.</source>
         <source>Remove %1?</source>
         <translation>删除 %1 吗?</translation>
     </message>
+    <message>
+        <source>This group was deleted while you were editing it.</source>
+        <translation>此分组在您编辑时已被删除。</translation>
+    </message>
 </context>
 <context>
     <name>LiveChart</name>
@@ -9610,6 +9646,30 @@ Error: %1</source>
         <source>Open Traffic Statistics…</source>
         <translation>打开流量统计…</translation>
     </message>
+    <message>
+        <source>This group was deleted while you were editing it.</source>
+        <translation>此分组在您编辑时已被删除。</translation>
+    </message>
+    <message>
+        <source>The Xray config &quot;%1&quot; needs &quot;%2&quot;, but the installed %3 does not contain it.</source>
+        <translation>Xray 配置“%1”需要“%2”，但已安装的 %3 中没有它。</translation>
+    </message>
+    <message>
+        <source>The Xray config &quot;%1&quot; needs geo data files that are not installed: %2. Download them under Basic Settings &gt; Miscellaneous &gt; Xray Geo Assets.</source>
+        <translation>Xray 配置“%1”需要未安装的地理数据文件：%2。请在“基本设置 &gt; 杂项 &gt; Xray 地理资源”中下载。</translation>
+    </message>
+    <message>
+        <source>Geo asset files are already being downloaded.</source>
+        <translation>地理资源文件正在下载中。</translation>
+    </message>
+    <message>
+        <source>Update is unavailable while a background Throne (PID %1) runs from this installation; stop it first.</source>
+        <translation>从此安装目录运行的后台 Throne（PID %1）仍在运行，无法更新；请先停止它。</translation>
+    </message>
+    <message>
+        <source>Kill switch is blocking traffic</source>
+        <translation>Kill Switch 正在阻断流量</translation>
+    </message>
 </context>
 <context>
     <name>OtpItem</name>
@@ -11173,6 +11233,26 @@ Release note:
         <source>Other outbounds</source>
         <translation>其他出站</translation>
     </message>
+    <message>
+        <source>Download stalled: no data arrived for %1 seconds.</source>
+        <translation>下载停滞：%1 秒内未收到数据。</translation>
+    </message>
+    <message>
+        <source>Throne needs at least one group.</source>
+        <translation>Throne 至少需要一个分组。</translation>
+    </message>
+    <message>
+        <source>This group&apos;s subscription is being updated. Try again when it finishes.</source>
+        <translation>此分组的订阅正在更新。请在更新完成后重试。</translation>
+    </message>
+    <message>
+        <source>Close the editor of this group or of one of its profiles first.</source>
+        <translation>请先关闭此分组或其某个配置的编辑器。</translation>
+    </message>
+    <message>
+        <source>This group no longer exists.</source>
+        <translation>此分组已不存在。</translation>
+    </message>
 </context>
 <context>
     <name>QPlatformTheme</name>
@@ -11784,6 +11864,10 @@ Remove that endpoint from this routing profile as well?</source>
         <source>Stopping…</source>
         <translation>正在停止…</translation>
     </message>
+    <message>
+        <source>Kill switch is blocking traffic</source>
+        <translation>Kill Switch 正在阻断流量</translation>
+    </message>
 </context>
 <context>
     <name>Sys::CoreDiagnostics</name>
@@ -11936,6 +12020,43 @@ Remove that endpoint from this routing profile as well?</source>
         <location filename="Throne-1.3.1/src/ui/widget/TrayProfileSelector.cpp" line="215"/>
         <source>Page %1/%2</source>
         <translation>页面 %1/%2</translation>
+    </message>
+</context>
+<context>
+    <name>Engine::CoreSupervisor</name>
+    <message>
+        <source>Throne could not open the local channel the core connects to (%1), so no profile can start.</source>
+        <translation>Throne 无法打开核心用于连接的本地通道（%1），因此无法启动任何配置档。</translation>
+    </message>
+    <message>
+        <source>Core unavailable</source>
+        <translation>核心不可用</translation>
+    </message>
+    <message>
+        <source>The core did not connect within %1 s, restarting it.</source>
+        <translation>核心未在 %1 秒内连接，正在重启。</translation>
+    </message>
+    <message>
+        <source>The core keeps exiting, so it is no longer restarted. Use Restart Core to try again.</source>
+        <translation>核心反复退出，已不再自动重启。请使用“重启核心”重试。</translation>
+    </message>
+</context>
+<context>
+    <name>GuiStartup</name>
+    <message>
+        <source>Throne is running in the background</source>
+        <translation>Throne 正在后台运行</translation>
+    </message>
+    <message>
+        <source>A background Throne (PID %1) is running on this computer (data directory: %2). Tun mode is unavailable here while it runs; stop it or use thronectl.</source>
+        <translation>此计算机上正在运行后台 Throne（PID %1，数据目录：%2）。它运行期间此处无法使用 Tun 模式；请停止它或使用 thronectl。</translation>
+    </message>
+</context>
+<context>
+    <name>Engine::ConnectionManager</name>
+    <message>
+        <source>A background Throne (PID %1) owns Tun on this computer; stop it or use thronectl.</source>
+        <translation>此计算机上的 Tun 由后台 Throne（PID %1）占用；请停止它或使用 thronectl。</translation>
     </message>
 </context>
 </TS>

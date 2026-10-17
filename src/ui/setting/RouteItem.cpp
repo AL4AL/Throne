@@ -995,7 +995,7 @@ void RouteItem::refreshIssueIcons() {
 
     const auto rule = currentRule();
     const auto issues = rule != nullptr ? rule->validate() : QList<Configs::RuleIssue>();
-    const QIcon icons[] = {QIcon(), style()->standardIcon(QStyle::SP_MessageBoxWarning), style()->standardIcon(QStyle::SP_MessageBoxCritical)};
+    const QIcon icons[] = {QIcon(), themeManager()->standardIcon(QStyle::SP_MessageBoxWarning), themeManager()->standardIcon(QStyle::SP_MessageBoxCritical)};
     for (int t = 0; t < ui->rule_attr_tabs->count(); ++t) {
         const QString attr = ui->rule_attr_tabs->widget(t)->property("routeAttr").toString();
         if (attr.isEmpty()) continue;
@@ -1008,7 +1008,7 @@ void RouteItem::refreshIssueIcons() {
 }
 
 void RouteItem::applyRuleMarks() {
-    const QIcon icons[] = {QIcon(), style()->standardIcon(QStyle::SP_MessageBoxWarning), style()->standardIcon(QStyle::SP_MessageBoxCritical)};
+    const QIcon icons[] = {QIcon(), themeManager()->standardIcon(QStyle::SP_MessageBoxWarning), themeManager()->standardIcon(QStyle::SP_MessageBoxCritical)};
     for (int i = 0; i < ui->route_items->count() && i < chain->Rules.size(); ++i) {
         ui->route_items->item(i)->setIcon(icons[std::clamp(ruleMarks.value(chain->Rules[i].get(), 0), 0, 2)]);
     }

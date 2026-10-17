@@ -1,8 +1,11 @@
 #include "include/ui/stats/RuntimeStatsWidget.h"
 
-#include "include/ui/mainwindow.h"
 #include "include/ui/stats/dialog_endpoint_details.h"
 #include "include/api/RPC.h"
+#include "include/engine/EngineHost.h"
+#include "include/engine/connection/ConnectionManager.h"
+#include "include/engine/supervisor/CoreSupervisor.h"
+#include "include/engine/vpn/VpnEndpoints.h"
 #include "include/configs/sub/GroupUpdater.hpp"
 #include "include/stats/traffic/TrafficLooper.hpp"
 #include "include/database/DatabaseManager.h"
@@ -34,6 +37,13 @@
 namespace {
     const QColor kRuntimeThroneColor = Stats::kStatsAccentColor;
     const QColor kRuntimeCoreColor = Stats::kStatsHealthyColor;
+
+    QString runningConfigName() {
+        auto *engine = Engine::host();
+        const auto running = engine != nullptr ? engine->connection()->runningSnapshot() : nullptr;
+        if (running == nullptr || running->outbound == nullptr) return {};
+        return running->outbound->DisplayTypeAndName();
+    }
 
     QString formatCpu(const Sys::ProcessMetrics::Sample& s) {
         return s.ok ? QString::number(s.cpuPercent, 'f', 1) + QStringLiteral("%") : QStringLiteral("—");
@@ -117,13 +127,13 @@ void RuntimeStatsWidget::hideEvent(QHideEvent *event) {
 
 void RuntimeStatsWidget::refreshLive() {
     if (!panelActive()) return;
-    auto* mw = GetMainWindow();
+    auto *engine = Engine::host();
 
     const auto selfSample = metrics_.sample(QCoreApplication::applicationPid());
     ui->vThroneRam->setText(formatRam(selfSample));
     ui->vThroneCpu->setText(formatCpu(selfSample));
 
-    const qint64 corePid = mw ? mw->GetCorePid() : 0;
+    const qint64 corePid = engine != nullptr ? engine->supervisor()->corePid() : 0;
     const auto coreSample = corePid > 0 ? metrics_.sample(corePid) : Sys::ProcessMetrics::Sample{};
     ui->vCoreRam->setText(formatRam(coreSample));
     ui->vCoreCpu->setText(formatCpu(coreSample));
@@ -177,7 +187,7 @@ void RuntimeStatsWidget::refreshLive() {
     const qint64 up = appStartEpoch > 0 ? QDateTime::currentSecsSinceEpoch() - appStartEpoch : 0;
     ui->vUptime->setText(Stats::HumanizeDuration(up));
 
-    const QString cfgName = mw ? mw->GetRunningConfigName() : QString();
+    const QString cfgName = runningConfigName();
     const qint64 nowSecs = QDateTime::currentSecsSinceEpoch();
     if (cfgName.isEmpty()) {
         ui->vCfgName->setText(tr("No active config"));
@@ -349,8 +359,7 @@ void RuntimeStatsWidget::openEndpointDetails(const QString& tag) {
 void RuntimeStatsWidget::probeEgress() {
     if (probing_.exchange(true)) return;
 
-    auto* mw = GetMainWindow();
-    if (mw == nullptr || mw->GetRunningConfigName().isEmpty()) {
+    if (runningConfigName().isEmpty()) {
         probing_.store(false);
         return;
     }
@@ -370,7 +379,7 @@ void RuntimeStatsWidget::probeEgress() {
             const auto res = API::defaultClient->Test(&ok, req);
             if (ok && !res.results.empty()) {
                 const int lat = res.results[0].latency_ms.value();
-                const auto vpnText = lat > 0 ? QString() : MainWindow::liveVpnConnectOkText();
+                const auto vpnText = lat > 0 ? QString() : Stats::LiveVpnConnectOkText();
                 pingText = lat > 0 ? QStringLiteral("%1 ms").arg(lat)
                                    : (vpnText.isEmpty() ? RuntimeStatsWidget::tr("Unavailable") : vpnText);
             } else {

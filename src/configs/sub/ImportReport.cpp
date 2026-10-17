@@ -75,7 +75,7 @@ namespace Subscription {
     }
 
     QString ImportReport::details(int maxLines) const {
-        QStringList lines;
+        QStringList rendered;
         const auto line = [](const Group &g) {
             QString text = g.field.isEmpty() ? g.message : g.field + ": " + g.message;
             const auto count = QString::number(g.count);
@@ -91,22 +91,35 @@ namespace Subscription {
                                                                         : QCoreApplication::translate("Validation", "[warning]");
             return tag + ' ' + text;
         };
+        for (const auto &group : lines()) {
+            if (rendered.size() >= maxLines) break;
+            rendered << line(group);
+        }
+        if (const auto more = groups.size() - rendered.size(); more > 0) {
+            rendered << QCoreApplication::translate("Validation", "…and %n more", nullptr, static_cast<int>(more));
+        }
+        return rendered.join('\n');
+    }
+
+    QList<ImportReport::Line> ImportReport::lines() const {
+        QList<Line> result;
+        result.reserve(groups.size());
         for (const auto severity : {Validation::Severity::Error, Validation::Severity::Warning}) {
             for (const auto &group : groups) {
-                if (group.severity != severity) continue;
-                if (lines.size() >= maxLines) break;
-                lines << line(group);
+                if (group.severity == severity) result << group;
             }
         }
-        if (const auto more = groups.size() - lines.size(); more > 0) {
-            lines << QCoreApplication::translate("Validation", "…and %n more", nullptr, static_cast<int>(more));
-        }
-        return lines.join('\n');
+        return result;
     }
 
     void ShowImportReport(const QString &title, const ImportReport &report) {
+        if (!IsGuiApp()) {
+            QString text = title + '\n' + report.summary();
+            if (const auto details = report.details(); !details.isEmpty()) text += '\n' + details;
+            MW_show_log(text);
+            return;
+        }
         auto *app = QCoreApplication::instance();
-        if (app == nullptr) return;
         QMetaObject::invokeMethod(app, [title, report] {
             static QHash<QString, QPointer<QMessageBox>> boxes;
             const auto details = report.details();

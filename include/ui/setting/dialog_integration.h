@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDialog>
+#include "include/engine/EditLocks.h"
 #include "include/global/Configs.hpp"
 #include "ui_dialog_integration.h"
 
@@ -50,5 +51,6 @@ private:
     QList<HotkeyEdit> hotkeyEdits;
     Validation::Form *form = nullptr;
     QString savedApiKey;
+    Engine::EditLock settingsLock{Engine::EditTarget::Settings};
     Ui::DialogIntegration *ui;
 };

@@ -291,14 +291,10 @@ namespace Configs {
     }
 
     void RoutesRepo::saveToDatabase(const RouteProfile* routeProfile, int id) const {
-        try {
-            db.execThrow("BEGIN IMMEDIATE");
+        db.transaction("RoutesRepo::saveToDatabase", [&] {
             saveToDatabaseInTx(routeProfile, id);
-            db.execThrow("COMMIT");
-        } catch (std::exception& e) {
-            try { db.execThrow("ROLLBACK"); } catch (...) {}
-            NotifyError("RoutesRepo::saveToDatabase", e);
-        }
+            return true;
+        });
     }
 
     void RoutesRepo::saveToDatabaseInTx(const RouteProfile* routeProfile, int id) const {

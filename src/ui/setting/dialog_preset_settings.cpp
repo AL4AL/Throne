@@ -1,11 +1,10 @@
 #include "include/ui/setting/dialog_preset_settings.h"
 
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 #include "include/global/Configs.hpp"
 #include "include/global/Validation.hpp"
 #include "include/configs/common/Outbound.h"
 #include "include/configs/common/QUICFields.h"
-#include "include/ui/mainwindow_interface.h"
 #include "include/ui/utils/ValidationForm.h"
 
 #include <QRegularExpression>

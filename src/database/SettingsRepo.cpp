@@ -58,6 +58,7 @@ namespace Configs {
             {"kill_switch",                   &kill_switch},
             {"remote_api_enable",             &remote_api_enable},
             {"remote_api_lan",                &remote_api_lan},
+            {"remote_api_admin_lan",          &remote_api_admin_lan},
             {"allow_beta_update",             &allow_beta_update},
             {"adblock_enable",                &adblock_enable},
             {"use_custom_icons",              &use_custom_icons},

@@ -5,6 +5,7 @@
 
 #include <atomic>
 
+#include "include/engine/EditLocks.h"
 #include "include/global/Configs.hpp"
 #include "include/ui/setting/RouteItem.h"
 #include "include/ui/utils/ValidationForm.h"
@@ -29,6 +30,9 @@ private:
     Ui::DialogManageRoutes *ui;
 
     Validation::Form* form = nullptr;
+
+    Engine::EditLock settingsLock{Engine::EditTarget::Settings};
+    Engine::EditLock routesLock{Engine::EditTarget::Routes};
 
     RouteItem* routeChainWidget;
 

@@ -3,7 +3,7 @@
 #include <QPushButton>
 
 #include "include/database/entities/Profile.h"
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 
 namespace Validation { class Form; }
 

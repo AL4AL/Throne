@@ -36,6 +36,8 @@
 #include "include/configs/sub/GroupUpdater.hpp"
 #include "include/database/GroupsRepo.h"
 #include "include/database/ProfilesRepo.h"
+#include "include/engine/EngineHost.h"
+#include "include/engine/services/ProfileService.h"
 #include "include/ui/mainWindow/MainWindowInternal.h"
 #include "include/ui/profile/dialog_edit_profile.h"
 #include "include/ui/utils/ProfilesTableModel.h"
@@ -49,9 +51,7 @@ void MainWindow::on_profilesTableView_doubleClicked(const QModelIndex &index) {
     if (!index.isValid() || !profilesTableModel) return;
     int id = index.data(ProfilesTableModel::ProfileIdRole).toInt();
     if (select_mode) {
-        emit profile_selected(id);
-        select_mode = false;
-        refresh_status();
+        finish_select_mode(id);
         return;
     }
     auto dialog = new DialogEditProfile("", id, this);
@@ -345,21 +345,7 @@ void MainWindow::on_menu_clear_test_result_triggered() {
 }
 
 int MainWindow::clear_test_results(const QList<int> &profileIds) {
-    const auto ents = Configs::dataManager->profilesRepo->GetProfileBatch(profileIds);
-    if (ents.empty()) return 0;
-    QSet<int> gids;
-    for (const auto &ent: ents) {
-        ent->ClearTestResults();
-        gids.insert(ent->gid);
-    }
-    Configs::dataManager->profilesRepo->SaveBatch(ents);
-    for (const int gid : gids) {
-        if (auto group = Configs::dataManager->groupsRepo->GetGroup(gid); group &&
-            group->calculated_column_width.size() > ProfilesTableModel::ColTestResult)
-            group->calculated_column_width[ProfilesTableModel::ColTestResult] = 0;
-    }
-    refresh_proxy_list();
-    return static_cast<int>(ents.size());
+    return Engine::host()->clearTestResults(profileIds);
 }
 
 void MainWindow::on_menu_select_all_triggered() {
@@ -617,6 +603,10 @@ void MainWindow::focusProfilesTable(bool selectFirst) {
 }
 
 void MainWindow::clearUnavailableProfiles(bool confirm, QList<int> profileIDs) {
+    if (!confirm) {
+        Engine::ProfileService::RemoveUnavailable(std::move(profileIDs));
+        return;
+    }
     QList<int> del_ids;
     int remove_display_count = 0;
     QString remove_display;

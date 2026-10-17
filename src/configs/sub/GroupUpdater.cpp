@@ -7,7 +7,9 @@
 #include "include/configs/sub/SubscriptionScan.hpp"
 #include "include/database/GroupsRepo.h"
 #include "include/database/ProfilesRepo.h"
+#include "include/engine/EngineEvents.h"
 #include "include/global/HTTPRequestHelper.hpp"
+#include "include/global/Notice.hpp"
 #include "include/global/Utils.hpp"
 
 #include <QCoreApplication>
@@ -117,7 +119,7 @@ namespace Subscription {
             DeleteOutcome outcome;
             const QSet<int> requested(ids.begin(), ids.end());
             outcome.ok = Configs::dataManager->profilesRepo->BatchDeleteProfiles(
-                ids, Configs::dataManager->settingsRepo->allow_stopping_active_profile);
+                ids, Configs::dataManager->settingsRepo->allow_stopping_active_profile, false);
             const QSet<int> deleted(ids.begin(), ids.end());
             outcome.deleted = std::move(ids);
             for (int id : requested) {
@@ -175,6 +177,14 @@ namespace Subscription {
             // Rows that really reached the database: added, or reused from the group.
             [[nodiscard]] int stored() const {
                 return static_cast<int>(std::count_if(entries.cbegin(), entries.cend(), [](const NewEntry &e) { return e.id >= 0; }));
+            }
+
+            [[nodiscard]] QList<int> storedIds() const {
+                QList<int> ids;
+                for (const auto &entry : entries) {
+                    if (entry.id >= 0) ids << entry.id;
+                }
+                return ids;
             }
 
             QList<NewEntry> entries;
@@ -236,6 +246,39 @@ namespace Subscription {
             return QCoreApplication::translate("Validation", "Could not download the subscription: %1").arg(error);
         }
 
+        QString groupUpdaterWebPageReason(const QByteArray &body) {
+            return looksLikeWebPage(body)
+                ? QCoreApplication::translate("Validation", "The server returned a web page instead of a subscription.")
+                : QString();
+        }
+
+        // Outcome errors reach the API, so they stay English.
+        UpdateOutcome groupUpdaterFailure(int gid, UpdateOutcome::Failure failure, const QString &error) {
+            UpdateOutcome outcome;
+            outcome.gid = gid;
+            outcome.failure = failure;
+            outcome.error = error;
+            return outcome;
+        }
+
+        UpdateOutcome groupUpdaterMissingGroup(int gid) {
+            return groupUpdaterFailure(gid, UpdateOutcome::Failure::NoGroup, QStringLiteral("The group no longer exists."));
+        }
+
+        QString groupUpdaterFetchError(const QString &reason) {
+            return QStringLiteral("Could not download the subscription: %1").arg(reason);
+        }
+
+        // Stays Internal when the job throws before replacing it.
+        std::shared_ptr<UpdateOutcome> groupUpdaterUnfinished(int gid, const QString &error) {
+            return std::make_shared<UpdateOutcome>(groupUpdaterFailure(gid, UpdateOutcome::Failure::Internal, error));
+        }
+
+        GroupUpdater::Finish groupUpdaterDeliver(const std::shared_ptr<UpdateOutcome> &outcome, const GroupUpdater::OutcomeFinish &done) {
+            if (done == nullptr) return nullptr;
+            return [outcome, done] { done(*outcome); };
+        }
+
         QString reportTitle(GroupUpdater::Surface surface, const QString &groupName) {
             return surface == GroupUpdater::Surface::Report
                 ? QCoreApplication::translate("Validation", "New subscription: %1").arg(groupName)
@@ -243,7 +286,7 @@ namespace Subscription {
         }
 
         void reportDeleteFailure() {
-            PostPassiveWarning("Internal error", "DB Error when deleting profiles, data may be corrupted");
+            PostNotice({NoticeLevel::Error, "Internal error", "DB Error when deleting profiles, data may be corrupted"});
         }
 
         QString notice(const QStringList &names, const QString &prefix, const QString &action) {
@@ -341,8 +384,8 @@ namespace Subscription {
         }
 
         // Each profile is listed under the first enabled action that claims it.
-        QList<int> removeFlagged(const QList<int> &ids, const Configs::SubscriptionOptions &options, QString &report) {
-            if (!options.remove_duplicates && !options.remove_insecure && !options.remove_invalid) return {};
+        DeleteOutcome removeFlagged(const QList<int> &ids, const Configs::SubscriptionOptions &options, QString &report) {
+            if (!options.remove_duplicates && !options.remove_insecure && !options.remove_invalid) return {true, {}, {}};
             QList<std::shared_ptr<Configs::Profile>> profiles;
             forEachProfile(ids, [&profiles](const std::shared_ptr<Configs::Profile> &ent) { profiles << ent; });
 
@@ -388,14 +431,14 @@ namespace Subscription {
                 }
             }
 
-            if (doomed.isEmpty()) return {};
+            if (doomed.isEmpty()) return {true, {}, {}};
             const auto outcome = deleteProfiles(doomed);
             if (!outcome.ok) {
                 reportDeleteFailure();
             }
             report += sections;
             if (!outcome.kept.isEmpty()) report += "\n" + QObject::tr("The running profile was kept.");
-            return outcome.deleted;
+            return outcome;
         }
 
         QList<int> removeUnavailableAndSort(const std::shared_ptr<Configs::Group> &group, const Configs::SubscriptionOptions &options, QString &report) {
@@ -490,10 +533,30 @@ namespace Subscription {
             return;
         }
         pending.insert(gid);
-        enqueueLocked({gid, false, [=, this] {
-            refresh(gid, surface);
-            emit asyncUpdateCallback(gid);
-        }, finish});
+        enqueueLocked(refreshJob(gid, false, surface, finish));
+    }
+
+    void GroupUpdater::RefreshWithOutcome(int gid, Surface surface, const OutcomeFinish &done) {
+        // Refused here: drain only clears pending for a gid >= 0, so such a job would never end.
+        if (gid < 0) {
+            if (done != nullptr) done(groupUpdaterMissingGroup(gid));
+            return;
+        }
+        QMutexLocker locker(&mutex);
+        if (done != nullptr) waiters[gid].append(done);
+        if (pending.contains(gid)) return;
+        pending.insert(gid);
+        enqueueLocked(refreshJob(gid, false, surface, nullptr));
+    }
+
+    bool GroupUpdater::IsBusy(int gid) {
+        QMutexLocker locker(&mutex);
+        return pending.contains(gid);
+    }
+
+    bool GroupUpdater::IsIdle() {
+        QMutexLocker locker(&mutex);
+        return !running && queue.isEmpty();
     }
 
     void GroupUpdater::RefreshAll(bool onlyAllowed) {
@@ -509,10 +572,7 @@ namespace Subscription {
             if (pending.contains(gid)) continue;
             pending.insert(gid);
             ++pendingBatch;
-            enqueueLocked({gid, true, [=, this] {
-                refresh(gid, Surface::Log);
-                emit asyncUpdateCallback(gid);
-            }, nullptr});
+            enqueueLocked(refreshJob(gid, true, Surface::Log, nullptr));
         }
     }
 
@@ -555,7 +615,7 @@ namespace Subscription {
             group->url = content;
             // Stored before the download: a failed one is fixed through the group's own TLS, HTTP and User Agent settings.
             Configs::dataManager->groupsRepo->AddGroup(group);
-            MW_dialog_message(MwMessage::SubscriptionNewGroup, {});
+            Engine::EngineEvents::SubscriptionNewGroup();
             refresh(group->id, Surface::Report);
             emit asyncUpdateCallback(group->id);
         }, finish});
@@ -568,9 +628,7 @@ namespace Subscription {
             Configs::SubUserInfo subInfo;
             QString error;
             if (fetch(content, QUrl(content).host(), ResolveIdentity(nullptr), body, subInfo, &error)) {
-                const auto emptyReason = looksLikeWebPage(body)
-                    ? QCoreApplication::translate("Validation", "The server returned a web page instead of a subscription.")
-                    : QString();
+                const auto emptyReason = groupUpdaterWebPageReason(body);
                 importDocuments(-1, {std::move(body)}, emptyReason);
             } else {
                 ImportReport report;
@@ -597,6 +655,39 @@ namespace Subscription {
             importDocuments(-1, std::move(documents));
             emit asyncUpdateCallback(-1);
         }, finish});
+    }
+
+    void GroupUpdater::ImportTextTo(int gid, const QString &text, const OutcomeFinish &done) {
+        QByteArray body = text.toUtf8();
+        const auto outcome = groupUpdaterUnfinished(gid, QStringLiteral("The import failed unexpectedly."));
+        enqueue({-1, false, [=, this]() mutable {
+            *outcome = Configs::dataManager->groupsRepo->GetGroup(gid) == nullptr
+                ? groupUpdaterMissingGroup(gid)
+                : importDocuments(gid, {std::move(body)}, {}, true);
+            emit asyncUpdateCallback(gid);
+        }, groupUpdaterDeliver(outcome, done)});
+    }
+
+    void GroupUpdater::ImportUrlTo(int gid, const QString &url, const OutcomeFinish &done) {
+        const auto content = url.trimmed();
+        const auto outcome = groupUpdaterUnfinished(gid, QStringLiteral("The import failed unexpectedly."));
+        enqueue({-1, false, [=, this] {
+            if (Configs::dataManager->groupsRepo->GetGroup(gid) == nullptr) {
+                *outcome = groupUpdaterMissingGroup(gid);
+                return;
+            }
+            QByteArray body;
+            Configs::SubUserInfo subInfo;
+            QString error;
+            if (fetch(content, QUrl(content).host(), ResolveIdentity(nullptr), body, subInfo, &error)) {
+                const auto emptyReason = groupUpdaterWebPageReason(body);
+                *outcome = importDocuments(gid, {std::move(body)}, emptyReason, true);
+            } else {
+                *outcome = groupUpdaterFailure(gid, UpdateOutcome::Failure::Fetch, groupUpdaterFetchError(error));
+                outcome->report.addFatal(fetchFailure(error));
+            }
+            emit asyncUpdateCallback(gid);
+        }, groupUpdaterDeliver(outcome, done)});
     }
 
     void GroupUpdater::CloneProfiles(const QList<int> &ids, const Finish &finish) {
@@ -630,9 +721,17 @@ namespace Subscription {
             sink.finish();
             const int count = sink.stored();
             settings->imported_count = count;
-            MW_dialog_message(MwMessage::SubscriptionFinished, {Int2String(count)});
+            Engine::EngineEvents::SubscriptionFinished(count, false);
             emit asyncUpdateCallback(-1);
         }, finish});
+    }
+
+    GroupUpdater::Job GroupUpdater::refreshJob(int gid, bool batch, Surface surface, const Finish &finish) {
+        const auto outcome = groupUpdaterUnfinished(gid, QStringLiteral("The update failed unexpectedly."));
+        return {gid, batch, [=, this] {
+            *outcome = refresh(gid, surface);
+            emit asyncUpdateCallback(gid);
+        }, finish, outcome};
     }
 
     void GroupUpdater::enqueue(Job job) {
@@ -670,9 +769,17 @@ namespace Subscription {
             guarded(job.run);
             // The UI clears its "updating" state in finish, so it must run even after a throw.
             if (job.finish != nullptr) guarded(job.finish);
-            QMutexLocker locker(&mutex);
-            if (job.gid >= 0) pending.remove(job.gid);
-            if (job.batch) --pendingBatch;
+            QList<OutcomeFinish> waiting;
+            {
+                QMutexLocker locker(&mutex);
+                if (job.gid >= 0) {
+                    pending.remove(job.gid);
+                    // Taken with the pending mark: a later RefreshWithOutcome queues a new job instead of joining this one.
+                    waiting = waiters.take(job.gid);
+                }
+                if (job.batch) --pendingBatch;
+            }
+            for (const auto &done : waiting) guarded([&] { done(*job.outcome); });
         }
     }
 
@@ -785,7 +892,7 @@ namespace Subscription {
         return true;
     }
 
-    void GroupUpdater::importDocuments(int gid, QList<QByteArray> documents, const QString &emptyReason) {
+    UpdateOutcome GroupUpdater::importDocuments(int gid, QList<QByteArray> documents, const QString &emptyReason, bool quiet) {
         auto &settings = Configs::dataManager->settingsRepo;
         settings->imported_count = 0;
         ImportSink sink(gid, nullptr);
@@ -807,40 +914,57 @@ namespace Subscription {
         }
         settings->imported_count = count;
         // The logged summary already carries the count, so the handler's own count line is skipped.
-        if (report.hasProblems()) {
-            logImportReport(report);
+        if (report.hasProblems()) logImportReport(report);
+        if (quiet) {
+            Engine::EngineEvents::SubscriptionFinished(count, true);
+        } else if (report.hasProblems()) {
             ShowImportReport(QCoreApplication::translate("Validation", "Import"), report);
-            MW_dialog_message(MwMessage::SubscriptionFinished, {MwArg::Quiet});
+            Engine::EngineEvents::SubscriptionFinished(-1, true);
         } else {
-            MW_dialog_message(MwMessage::SubscriptionFinished, {Int2String(count)});
+            Engine::EngineEvents::SubscriptionFinished(count, false);
         }
+
+        UpdateOutcome outcome;
+        outcome.gid = gid;
+        if (gid >= 0 && Configs::dataManager->groupsRepo->GetGroup(gid) == nullptr) {
+            outcome = groupUpdaterMissingGroup(gid);
+        } else if (count == 0) {
+            outcome.failure = UpdateOutcome::Failure::Empty;
+            outcome.error = !emptyReason.isEmpty() ? emptyReason : report.fatalReasons().value(0, QStringLiteral("No profiles were found."));
+        } else {
+            outcome.addedIds = sink.storedIds();
+        }
+        outcome.report = std::move(report);
+        return outcome;
     }
 
-    void GroupUpdater::refresh(int gid, Surface surface) {
+    UpdateOutcome GroupUpdater::refresh(int gid, Surface surface) {
         Configs::dataManager->settingsRepo->imported_count = 0;
         auto group = Configs::dataManager->groupsRepo->GetGroup(gid);
-        if (group == nullptr || group->archive) return;
+        if (group == nullptr) return groupUpdaterMissingGroup(gid);
+        if (group->archive) return groupUpdaterFailure(gid, UpdateOutcome::Failure::NoGroup, QStringLiteral("The group is archived."));
 
         const QString url = group->url.trimmed();
         QByteArray body;
         Configs::SubUserInfo subInfo;
         QString error;
         if (!fetch(url, group->name, ResolveIdentity(group.get()), body, subInfo, &error)) {
-            if (surface != Surface::Log) {
-                ImportReport report;
-                report.addFatal(fetchFailure(error));
-                if (surface == Surface::Report) {
-                    report.addFatal(QCoreApplication::translate("Validation", "The group %1 was created, but its first download failed. Update it to try again; if the download keeps failing, try another TLS version, HTTP version or User Agent in the group's Advanced settings.").arg(group->name));
-                }
-                ShowImportReport(reportTitle(surface, group->name), report);
+            auto outcome = groupUpdaterFailure(gid, UpdateOutcome::Failure::Fetch, groupUpdaterFetchError(error));
+            outcome.report.addFatal(fetchFailure(error));
+            if (surface == Surface::Report) {
+                outcome.report.addFatal(QCoreApplication::translate("Validation", "The group %1 was created, but its first download failed. Update it to try again; if the download keeps failing, try another TLS version, HTTP version or User Agent in the group's Advanced settings.").arg(group->name));
             }
-            return;
+            if (surface != Surface::Log) ShowImportReport(reportTitle(surface, group->name), outcome.report);
+            return outcome;
         }
-        applyRefresh(group, url, std::move(body), subInfo, surface);
+        UpdateOutcome outcome;
+        outcome.gid = gid;
+        applyRefresh(group, url, std::move(body), subInfo, surface, outcome);
+        return outcome;
     }
 
     void GroupUpdater::applyRefresh(const std::shared_ptr<Configs::Group> &group, const QString &url, QByteArray body,
-                                    const Configs::SubUserInfo &subInfo, Surface surface) {
+                                    const Configs::SubUserInfo &subInfo, Surface surface, UpdateOutcome &result) {
         auto &settings = Configs::dataManager->settingsRepo;
         auto &profilesRepo = Configs::dataManager->profilesRepo;
         auto &groupsRepo = Configs::dataManager->groupsRepo;
@@ -849,6 +973,8 @@ namespace Subscription {
 
         if (group->url.trimmed() != url) {
             MW_show_log(QObject::tr("The URL of %1 changed during the update, so the result was discarded.").arg(group->name));
+            result.failure = UpdateOutcome::Failure::Fetch;
+            result.error = QStringLiteral("The subscription URL changed during the update.");
             return;
         }
 
@@ -868,6 +994,9 @@ namespace Subscription {
             probeReport.addFatal(QObject::tr("No profiles found in the subscription: %1 was left unchanged.").arg(group->name));
             logImportReport(probeReport);
             if (surface != Surface::Log) ShowImportReport(reportTitle(surface, group->name), probeReport);
+            result.failure = UpdateOutcome::Failure::Empty;
+            result.error = probeReport.fatalReasons().join('\n');
+            result.report = std::move(probeReport);
             return;
         }
 
@@ -895,6 +1024,8 @@ namespace Subscription {
 
         // Ids a running auto selector can no longer trust: deleted, or same id with new settings.
         QList<int> disturbed;
+        QSet<int> keptIds;
+        bool deleteFailed = false;
         bool cleared = false;
         if (settings->sub_clear) {
             MW_show_log(QObject::tr("Clearing servers..."));
@@ -908,10 +1039,13 @@ namespace Subscription {
             }
             const auto outcome = deleteProfiles(doomed);
             if (!outcome.ok) {
-                PostPassiveWarning("Internal Error", "DB Error when deleting profiles, Please try again.");
+                PostNotice({NoticeLevel::Error, "Internal Error", "DB Error when deleting profiles, Please try again."});
+                result.failure = UpdateOutcome::Failure::Database;
+                result.error = QStringLiteral("The old profiles could not be deleted from the database.");
                 return;
             }
             disturbed = outcome.deleted;
+            result.removed = static_cast<int>(outcome.deleted.size());
             // A survivor still belongs to the subscription: fall through to the diff.
             cleared = members().isEmpty();
         }
@@ -936,6 +1070,7 @@ namespace Subscription {
 
         QString change_text;
         if (cleared) {
+            result.added = sink.stored();
             if (sink.entries.size() >= 1000) {
                 change_text += "[+] " + Int2String(sink.entries.size()) + " profiles\n";
             } else {
@@ -943,6 +1078,8 @@ namespace Subscription {
             }
         } else {
             const auto plan = Reconcile(old, sink.entries, index);
+            result.added = static_cast<int>(plan.added.size());
+            result.updated = static_cast<int>(plan.updates.size());
             for (const auto &[oldId, newId] : plan.updates) {
                 auto oldEnt = profilesRepo->GetProfile(oldId);
                 const auto newEnt = profilesRepo->GetProfile(newId);
@@ -968,8 +1105,16 @@ namespace Subscription {
             const auto outcome = deleteProfiles(stale);
             if (!outcome.ok) {
                 reportDeleteFailure();
+                deleteFailed = true;
             }
             disturbed << outcome.deleted;
+            // stale also lists the fresh rows that only carried an update into an old id.
+            const QSet<int> deletedIds(outcome.deleted.begin(), outcome.deleted.end());
+            for (const auto &entry : old) {
+                if (deletedIds.contains(entry.id)) ++result.removed;
+            }
+            for (int id : outcome.kept) keptIds << id;
+            for (int id : keptWorking) keptIds << id;
 
             // Nothing rebuilds group->profiles from the rows: a survivor left out here is orphaned.
             const auto restore = [&](int id) {
@@ -1020,7 +1165,15 @@ namespace Subscription {
             }
         }
 
-        disturbed << removeFlagged(members(), options, change_text);
+        const auto flagged = removeFlagged(members(), options, change_text);
+        disturbed << flagged.deleted;
+        result.removed += static_cast<int>(flagged.deleted.size());
+        for (int id : flagged.kept) keptIds << id;
+        result.kept = static_cast<int>(keptIds.size());
+        if (deleteFailed || !flagged.ok) {
+            result.failure = UpdateOutcome::Failure::Database;
+            result.error = QStringLiteral("Some profiles could not be deleted from the database.");
+        }
 
         // The subscription's own order replaced the group's above.
         group->Resort();
@@ -1038,20 +1191,16 @@ namespace Subscription {
                 diffBody += "\n\n" + QCoreApplication::translate("Validation", "Problems:") + "\n" + report.summary();
                 if (const auto details = report.details(); !details.isEmpty()) diffBody += "\n" + details;
             }
-            runOnUiThread([diffTitle, diffBody] { MessageBoxScrollable(diffTitle, diffBody); });
+            Engine::EngineEvents::SubscriptionDiff(diffTitle, diffBody);
         } else if (surface != Surface::Log && report.hasProblems()) {
             ShowImportReport(reportTitle(surface, group->name), report);
         }
         // Auto selectors resolve members from the group at build time, so a refresh can invalidate an untouched one.
-        QStringList selectorArgs{Int2String(group->id)};
-        for (int id : disturbed) selectorArgs << Int2String(id);
-        MW_dialog_message(MwMessage::SubscriptionGroupChanged, selectorArgs);
-        MW_dialog_message(MwMessage::SubscriptionFinished, {MwArg::Quiet});
+        Engine::EngineEvents::SubscriptionGroupChanged(group->id, disturbed);
+        Engine::EngineEvents::SubscriptionFinished(-1, true);
+        result.report = std::move(report);
 
-        if (options.url_test) requestUrlTest(gid, members());
-    }
-
-    void GroupUpdater::requestUrlTest(int gid, const QList<int> &profileIDs) {
+        if (!options.url_test) return;
         UrlTester tester;
         {
             QMutexLocker locker(&mutex);
@@ -1059,7 +1208,7 @@ namespace Subscription {
         }
         if (tester == nullptr) return;
         // Back through the queue, so the follow-up never races another job over the group.
-        tester(profileIDs, [=, this] { enqueue({-1, false, [=, this] { afterUrlTest(gid); }, nullptr}); });
+        tester(members(), surface != Surface::Log, [=, this] { enqueue({-1, false, [=, this] { afterUrlTest(gid); }, nullptr}); });
     }
 
     void GroupUpdater::afterUrlTest(int gid) {
@@ -1072,9 +1221,7 @@ namespace Subscription {
         const auto deleted = removeUnavailableAndSort(group, options, report);
         if (!report.isEmpty()) MW_show_log("<<<<<<<< " + QObject::tr("After the URL test of %1:").arg(group->name) + report);
 
-        QStringList selectorArgs{Int2String(gid)};
-        for (int id : deleted) selectorArgs << Int2String(id);
-        MW_dialog_message(MwMessage::SubscriptionGroupChanged, selectorArgs);
-        MW_dialog_message(MwMessage::SubscriptionFinished, {MwArg::Quiet});
+        Engine::EngineEvents::SubscriptionGroupChanged(gid, deleted);
+        Engine::EngineEvents::SubscriptionFinished(-1, true);
     }
 } // namespace Subscription

@@ -45,7 +45,11 @@ inline qint64 appStartEpoch = 0;
 
 class QWidget;
 inline QWidget *mainwindow;
-inline std::function<void(QString)> MW_show_log;
+
+// Thread-safe and never throws; without a sink the line only reaches the log file.
+void MW_show_log(const QString &line);
+
+void SetUserLogSink(std::function<void(const QString &)> sink);
 
 enum class MwMessage {
     UpdateSettings,       // args: MwArg settings-change tokens
@@ -54,13 +58,6 @@ enum class MwMessage {
     UpdateShortcuts,
     ProfileChanged,       // arg MwArg::RestartProxy when the saved profile is part of the running config
     GroupsChanged,        // arg MwArg::RestartProxy when the edited group changed what a running profile dials
-    SubscriptionFinished, // args[0] may carry the job's imported count; MwArg::Quiet skips the import-count line
-    SubscriptionNewGroup,
-    // args: { group id, then the id of every profile it deleted or replaced in place }
-    SubscriptionGroupChanged,
-    GroupOrderChanged,    // args: ids of the groups a kept sort reordered
-    CoreCrashed,
-    CoreStarted,          // args: { startedProfileId }
 };
 
 // String tokens carried in a MwMessage's argument list.
@@ -80,11 +77,13 @@ namespace MwArg {
     inline const QString RemoteApi    = QStringLiteral("remoteApi");
     // ProfileChanged arg.
     inline const QString RestartProxy = QStringLiteral("restartProxy");
-    // SubscriptionFinished arg.
-    inline const QString Quiet        = QStringLiteral("quiet");
 }
 
-inline std::function<void(MwMessage, QStringList)> MW_dialog_message;
+// Thread-safe; dropped while no sink is installed.
+void MW_dialog_message(MwMessage cmd, const QStringList &args);
+
+void SetDialogMessageSink(std::function<void(MwMessage, const QStringList &)> sink);
+
 // Set by MainWindow; marshals to the UI thread.
 inline std::function<void(QString)> MW_handle_deeplink;
 
@@ -95,11 +94,13 @@ inline std::function<void(QStringList)> MW_import_files;
 QString Deeplink_ExtractFromArgs(const QStringList &args);
 void Deeplink_Submit(const QString &url);
 void Deeplink_FlushPending();
+QString Deeplink_TakePending();
 
 // Paths may be given either as a plain path or as a file:// URL.
 QStringList LaunchFiles_ExtractFromArgs(const QStringList &args, const QDir &launchDir);
 void LaunchFiles_Submit(const QStringList &paths);
 void LaunchFiles_FlushPending();
+QStringList LaunchFiles_TakePending();
 
 class QThread;
 inline QThread *DS_cores;
@@ -224,6 +225,15 @@ inline bool IsValidPort(int port) {
     return InRange(port, 1, 65535);
 }
 
+// False under a plain QCoreApplication (headless) or before any app object exists; the helpers below then show nothing.
+bool IsGuiApp();
+
+// Dialogs swallowed because no QApplication exists; headless should keep this at 0.
+int HeadlessDialogCount();
+
+// Logs a HEADLESS-DIALOG line and counts it in HeadlessDialogCount().
+void LogHeadlessDialog(const QString &kind, const QString &title, const QString &text, const QString &defaultValue);
+
 QWidget *GetMessageBoxParent();
 
 int MessageBoxWarning(const QString &title, const QString &text);
@@ -270,6 +280,7 @@ inline void connectOnce(EMITTER *emitter, SIGNAL signal, RECEIVER *receiver, Rec
 void setTimeout(const std::function<void()> &callback, QObject *obj, int timeout = 0);
 
 inline bool isDarkMode() {
+    if (!IsGuiApp()) return false;
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     return qApp->styleHints()->colorScheme() == Qt::ColorScheme::Dark;
 #endif

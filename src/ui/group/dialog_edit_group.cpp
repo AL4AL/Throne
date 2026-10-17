@@ -1,7 +1,5 @@
 #include "include/ui/group/dialog_edit_group.h"
 
-#include "include/ui/mainwindow_interface.h"
-
 #include <QClipboard>
 #include <QHash>
 #include <QStringListModel>
@@ -38,6 +36,7 @@ namespace {
 DialogEditGroup::DialogEditGroup(const std::shared_ptr<Configs::Group> &ent, QWidget *parent) : QDialog(parent), ui(new Ui::DialogEditGroup) {
     ui->setupUi(this);
     this->ent = ent;
+    if (ent->id >= 0) editLock.emplace(Engine::EditTarget::Group, ent->id);
     form = new Validation::Form(this);
     form->attachStatus(ui->buttonBox);
 

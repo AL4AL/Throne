@@ -1,9 +1,11 @@
 #pragma once
 #include <QDialog>
+#include <optional>
 #include "profile_editor.h"
 
 #include "ui_dialog_edit_profile.h"
 #include "include/database/entities/Profile.h"
+#include "include/engine/EditLocks.h"
 
 namespace Ui {
     class DialogEditProfile;
@@ -41,6 +43,7 @@ private:
     int groupId = -1;
     bool newEnt = false;
     std::shared_ptr<Configs::Profile> ent;
+    std::optional<Engine::EditLock> editLock;
 
     QString network_title_base;
 

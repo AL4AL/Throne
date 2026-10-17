@@ -1,8 +1,10 @@
 #include "include/stats/traffic/TrafficLooper.hpp"
 
 #include "include/api/RPC.h"
-#include "include/ui/mainwindow_interface.h"
+#include "include/global/Utils.hpp"
+#include "include/stats/StatsSink.hpp"
 
+#include <QObject>
 #include <QThread>
 #include <QJsonDocument>
 #include <QHash>
@@ -121,14 +123,12 @@ namespace Stats {
                 if (looping) {
                     looping = false;
                     runOnUiThread([=] {
-                        auto m = GetMainWindow();
-                        m->refresh_status("STOP");
+                        if (auto *sink = CurrentStatsSink()) sink->onTrafficStopped();
                     });
                 }
                 if (const auto now = MonotonicMs(); emitDue(now)) {
                     runOnUiThread([=] {
-                        auto m = GetMainWindow();
-                        m->add_traffic_point(now, false, {}, 0, 0, 0, 0);
+                        if (auto *sink = CurrentStatsSink()) sink->onTrafficSample(TrafficSample{.monoMs = now});
                     });
                 }
                 continue;
@@ -180,10 +180,9 @@ namespace Stats {
 
             if (!due) continue;
             runOnUiThread([=] {
-                auto m = GetMainWindow();
-                m->refresh_status(status);
-                m->add_traffic_point(now, true, values, proxyDown, proxyUp, directDown, directUp);
-                if (!ids.isEmpty()) m->refresh_proxy_list(ids);
+                if (auto *sink = CurrentStatsSink()) {
+                    sink->onTrafficSample(TrafficSample{now, true, values, proxyDown, proxyUp, directDown, directUp, status, ids});
+                }
             });
         }
     }
@@ -281,7 +280,9 @@ namespace Stats {
             rateWindow.clear();
             lastProbeMs = MonotonicMs();
         }
-        runOnUiThread([newLines] { GetMainWindow()->set_traffic_lines(newLines); });
+        runOnUiThread([newLines] {
+            if (auto *sink = CurrentStatsSink()) sink->onTrafficLines(newLines);
+        });
 
         trafficStatsManager->EnsureDirectMeta();
         QSet<int> snapshotted;

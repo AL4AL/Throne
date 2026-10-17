@@ -1126,6 +1126,26 @@ Throne will restart to complete the restore.</source>
         <source>Select at least one part to restore.</source>
         <translation>Выберите хотя бы один раздел для восстановления.</translation>
     </message>
+    <message>
+        <source>A geo asset download is already running.</source>
+        <translation>Загрузка геоданных уже выполняется.</translation>
+    </message>
+    <message>
+        <source>The backup file is damaged or incomplete.</source>
+        <translation>Файл резервной копии повреждён или неполон.</translation>
+    </message>
+    <message>
+        <source>There is nothing to back up</source>
+        <translation>Нечего сохранять в резервную копию</translation>
+    </message>
+    <message>
+        <source>A subscription update is running; try again when it finishes.</source>
+        <translation>Выполняется обновление подписки; повторите попытку после его завершения.</translation>
+    </message>
+    <message>
+        <source>The backup&apos;s database is damaged: %1</source>
+        <translation>База данных резервной копии повреждена: %1</translation>
+    </message>
 </context>
 <context>
     <name>DialogEditGroup</name>
@@ -2152,6 +2172,10 @@ Throne will restart to complete the restore.</source>
         <source>Headers cannot contain &quot;|&quot;.</source>
         <translation>Заголовки не могут содержать символ &quot;|&quot;.</translation>
     </message>
+    <message>
+        <source>This profile was deleted while you were editing it.</source>
+        <translation>Этот профиль был удалён, пока вы его редактировали.</translation>
+    </message>
 </context>
 <context>
     <name>DialogEndpointDetails</name>
@@ -2257,6 +2281,14 @@ Throne will restart to complete the restore.</source>
     <message>
         <source>Shortcuts</source>
         <translation>Горячие клавиши</translation>
+    </message>
+    <message>
+        <source>Allow management from the local network</source>
+        <translation>Разрешить управление из локальной сети</translation>
+    </message>
+    <message>
+        <source>Lets devices on the local network import, delete, change settings, back up and restore through the Throne API. This device can always do so.</source>
+        <translation>Позволяет устройствам в локальной сети импортировать, удалять, менять настройки, создавать резервные копии и восстанавливать их через Throne API. Это устройство может делать это всегда.</translation>
     </message>
 </context>
 <context>
@@ -6484,6 +6516,10 @@ Improves hole-punching reliability. Requires IPv4.</source>
         <source>Remove %1?</source>
         <translation>Удалить %1?</translation>
     </message>
+    <message>
+        <source>This group was deleted while you were editing it.</source>
+        <translation>Эта группа была удалена, пока вы её редактировали.</translation>
+    </message>
 </context>
 <context>
     <name>LiveChart</name>
@@ -7752,6 +7788,30 @@ Name: %1</source>
         <source>Open Traffic Statistics…</source>
         <translation>Открыть статистику трафика…</translation>
     </message>
+    <message>
+        <source>This group was deleted while you were editing it.</source>
+        <translation>Эта группа была удалена, пока вы её редактировали.</translation>
+    </message>
+    <message>
+        <source>The Xray config &quot;%1&quot; needs &quot;%2&quot;, but the installed %3 does not contain it.</source>
+        <translation>Конфигурации Xray «%1» нужен «%2», но в установленном %3 его нет.</translation>
+    </message>
+    <message>
+        <source>The Xray config &quot;%1&quot; needs geo data files that are not installed: %2. Download them under Basic Settings &gt; Miscellaneous &gt; Xray Geo Assets.</source>
+        <translation>Конфигурации Xray «%1» нужны неустановленные файлы геоданных: %2. Загрузите их в «Основные настройки &gt; Разное &gt; Геоданные Xray».</translation>
+    </message>
+    <message>
+        <source>Geo asset files are already being downloaded.</source>
+        <translation>Файлы геоданных уже загружаются.</translation>
+    </message>
+    <message>
+        <source>Update is unavailable while a background Throne (PID %1) runs from this installation; stop it first.</source>
+        <translation>Обновление недоступно, пока из этой установки работает фоновый Throne (PID %1); сначала остановите его.</translation>
+    </message>
+    <message>
+        <source>Kill switch is blocking traffic</source>
+        <translation>Kill switch блокирует трафик</translation>
+    </message>
 </context>
 <context>
     <name>OtpItem</name>
@@ -8988,6 +9048,26 @@ Release note:
         <source>Other outbounds</source>
         <translation>Прочие outbound</translation>
     </message>
+    <message>
+        <source>Download stalled: no data arrived for %1 seconds.</source>
+        <translation>Загрузка остановилась: данные не поступали %1 с.</translation>
+    </message>
+    <message>
+        <source>Throne needs at least one group.</source>
+        <translation>Throne нужна хотя бы одна группа.</translation>
+    </message>
+    <message>
+        <source>This group&apos;s subscription is being updated. Try again when it finishes.</source>
+        <translation>Подписка этой группы обновляется. Повторите попытку после завершения.</translation>
+    </message>
+    <message>
+        <source>Close the editor of this group or of one of its profiles first.</source>
+        <translation>Сначала закройте редактор этой группы или одного из её профилей.</translation>
+    </message>
+    <message>
+        <source>This group no longer exists.</source>
+        <translation>Этой группы больше не существует.</translation>
+    </message>
 </context>
 <context>
     <name>QPlatformTheme</name>
@@ -9474,6 +9554,10 @@ Remove that endpoint from this routing profile as well?</source>
         <source>Stopping…</source>
         <translation>Отключение…</translation>
     </message>
+    <message>
+        <source>Kill switch is blocking traffic</source>
+        <translation>Kill switch блокирует трафик</translation>
+    </message>
 </context>
 <context>
     <name>SubscriptionInfoCard</name>
@@ -9632,6 +9716,43 @@ Remove that endpoint from this routing profile as well?</source>
     <message>
         <source>Page %1/%2</source>
         <translation>Страница %1/%2</translation>
+    </message>
+</context>
+<context>
+    <name>Engine::CoreSupervisor</name>
+    <message>
+        <source>Throne could not open the local channel the core connects to (%1), so no profile can start.</source>
+        <translation>Throne не удалось открыть локальный канал, через который подключается ядро (%1), поэтому ни один профиль не может быть запущен.</translation>
+    </message>
+    <message>
+        <source>Core unavailable</source>
+        <translation>Ядро недоступно</translation>
+    </message>
+    <message>
+        <source>The core did not connect within %1 s, restarting it.</source>
+        <translation>Ядро не подключилось за %1 с, перезапуск.</translation>
+    </message>
+    <message>
+        <source>The core keeps exiting, so it is no longer restarted. Use Restart Core to try again.</source>
+        <translation>Ядро постоянно завершает работу, поэтому больше не перезапускается. Попробуйте снова через «Перезапуск ядра».</translation>
+    </message>
+</context>
+<context>
+    <name>GuiStartup</name>
+    <message>
+        <source>Throne is running in the background</source>
+        <translation>Throne работает в фоновом режиме</translation>
+    </message>
+    <message>
+        <source>A background Throne (PID %1) is running on this computer (data directory: %2). Tun mode is unavailable here while it runs; stop it or use thronectl.</source>
+        <translation>На этом компьютере работает фоновый Throne (PID %1, каталог данных: %2). Пока он работает, режим Tun здесь недоступен; остановите его или используйте thronectl.</translation>
+    </message>
+</context>
+<context>
+    <name>Engine::ConnectionManager</name>
+    <message>
+        <source>A background Throne (PID %1) owns Tun on this computer; stop it or use thronectl.</source>
+        <translation>Tun на этом компьютере занят фоновым Throne (PID %1); остановите его или используйте thronectl.</translation>
     </message>
 </context>
 </TS>

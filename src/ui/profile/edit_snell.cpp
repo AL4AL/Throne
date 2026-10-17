@@ -1,6 +1,6 @@
 #include "include/ui/profile/edit_snell.h"
 
-#include "include/global/GuiUtils.hpp"
+#include "include/ui/utils/GuiUtils.hpp"
 #include "include/ui/utils/ValidationForm.h"
 
 EditSnell::EditSnell(QWidget *parent) : QWidget(parent), ui(new Ui::EditSnell) {

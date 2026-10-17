@@ -134,6 +134,15 @@ namespace Configs
     // coreUnreachable is set when a false came from a failed core call rather than from the config.
     bool IsValid(const std::shared_ptr<Profile> &ent, bool *coreUnreachable = nullptr);
 
+    // While alive, IsValid() on this thread runs only its local checks and counts the core's CheckConfig as passed.
+    class ScopedOfflineValidation {
+    public:
+        ScopedOfflineValidation();
+        ~ScopedOfflineValidation();
+        ScopedOfflineValidation(const ScopedOfflineValidation &) = delete;
+        ScopedOfflineValidation &operator=(const ScopedOfflineValidation &) = delete;
+    };
+
     // Eligible: an openvpn/openconnect profile, or a chain whose exit hop is one, never the reverse.
     bool CanBeAuxEndpoint(const std::shared_ptr<Profile> &ent);
 

@@ -2,7 +2,7 @@
 
 
 #include "include/database/ProfilesRepo.h"
-#include "include/ui/mainwindow_interface.h"
+#include "include/ui/mainwindow.h"
 #include "include/ui/profile/ProxyItem.h"
 #include "include/ui/utils/ValidationForm.h"
 

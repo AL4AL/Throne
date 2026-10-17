@@ -4,6 +4,8 @@ Qt based Desktop cross-platform GUI proxy utility, empowered by [Sing-box](https
 
 Supports Windows 11/10/8/7 / Linux / MacOS out of the box.
 
+It also runs without a window, as a service or in a container, controlled with thronectl: see [Headless Throne](docs/headless.md).
+
 <img width="1002" height="789" alt="image" src="https://github.com/user-attachments/assets/af4a8e32-7e55-430c-9402-ec2d665cf71a" />
 
 ### Note on MacOS releases

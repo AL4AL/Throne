@@ -1,8 +1,11 @@
 #include <QThread>
 #include <QDateTime>
+#include <QObject>
 #include <core/gen/libcore.pb.h>
 #include <include/api/RPC.h>
-#include "include/ui/mainwindow_interface.h"
+#include "include/database/DatabaseManager.h"
+#include "include/global/Utils.hpp"
+#include "include/stats/StatsSink.hpp"
 #include <include/stats/connections/connectionLister.hpp>
 #include "include/stats/traffic/TrafficStatsManager.hpp"
 #include "include/global/LocalNetwork.hpp"
@@ -290,7 +293,7 @@ namespace Stats
         }
 
         runOnUiThread([rows = std::move(rows)] {
-            if (auto* m = GetMainWindow()) m->UpdateConnectionList(rows);
+            if (auto* sink = CurrentStatsSink()) sink->onConnections(rows);
         });
     }
 

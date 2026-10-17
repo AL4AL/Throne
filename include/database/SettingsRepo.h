@@ -179,6 +179,7 @@ namespace Configs {
         // Remote API
         bool remote_api_enable = false;
         bool remote_api_lan = false;
+        bool remote_api_admin_lan = false;
         int remote_api_port = 9095;
         QString remote_api_key = "";
         // CIDRs separated by commas or whitespace; empty allows every LAN address.
