@@ -70,6 +70,10 @@ namespace Configs {
     // Read-only, corrupt or not a database: the file itself is unusable and retrying cannot help.
     bool IsFatalDbError(const DbError& err);
 
+    // An existing database file (or its -wal/-shm) this user cannot read and write: Unix access() fails with EACCES/EPERM;
+    // Windows the read-only attribute or, with Qt >= 6.6, the NTFS ACL. A missing file is not denied.
+    bool DbFilesDenied(const QString& dbFile);
+
     // Logs (rate-limited per query) and shows one passive notice per query per window; never blocks the caller.
     void NotifyError(const std::string& query, const DbError& err);
 

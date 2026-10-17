@@ -13,6 +13,8 @@
 #include <limits>
 #include <utility>
 
+#include "include/api/RPC.h"
+#include "include/api/remote/Overlay.hpp"
 #include "include/configs/generate.h"
 #include "include/database/GroupsRepo.h"
 #include "include/database/ProfilesRepo.h"
@@ -31,6 +33,7 @@ namespace RemoteApi::RouterImpl {
     constexpr qint64 kDefaultMaxAgeSec = 3600;
     constexpr qint64 kTrafficWindowSec = 24 * 3600;
     constexpr qint64 kLiveRatesFreshMs = 3000;
+    constexpr int kTunCapsRefreshMs = 1000;
 
     bool matchPath(const QString &pattern, const QString &path, int *id) {
         const auto want = pattern.split(QLatin1Char('/'));
@@ -102,13 +105,36 @@ namespace RemoteApi::RouterImpl {
 #endif
     }
 
-    QJsonValue degradedReason() {
-        const auto &settings = Configs::dataManager->settingsRepo;
-        if (!settings->core_running) return QStringLiteral("core_unavailable");
-        if (settings->kill_switch && Sys::KillSwitch::instance()->state() == Sys::KillSwitch::State::Failed) {
-            return QStringLiteral("kill_switch_failed");
-        }
-        return QJsonValue();
+    // null until the core answers the privilege probe, rather than a false that is not known yet.
+    QJsonValue tunCapability() {
+        if (Configs::dataManager->settingsRepo->disable_privilege_req) return true;
+#ifdef Q_OS_WIN
+        const auto admin = Configs::KnownAdmin();
+        return admin ? QJsonValue(*admin) : QJsonValue();
+#else
+        const auto caps = Configs::KnownCapabilities();
+        if (!caps) return {};
+        return caps->privileged && caps->tunDevice.value_or(true) && caps->netAdmin.value_or(true);
+#endif
+    }
+
+    bool killSwitchCapability() {
+        if (!killSwitchSupported()) return false;
+#ifdef Q_OS_WIN
+        return Configs::KnownAdmin().value_or(true);
+#else
+        const auto caps = Configs::KnownCapabilities();
+        return !caps || caps->killSwitch.value_or(caps->privileged);
+#endif
+    }
+
+    QString tunPrivilegeMessage() {
+        const auto caps = Configs::KnownCapabilities();
+        if (!caps || (caps->tunDevice != false && caps->netAdmin != false) || caps->detail.isEmpty())
+            return QStringLiteral("Tun needs privileges that Throne does not have; grant them in Throne once");
+        // A privileged core that still lacks the device or CAP_NET_ADMIN gains nothing from more privileges.
+        if (caps->privileged) return QStringLiteral("Tun cannot work with Throne's core: %1").arg(caps->detail);
+        return QStringLiteral("Tun needs privileges that Throne does not have (%1); grant them in Throne once").arg(caps->detail);
     }
 
     Response busyConnection() {
@@ -264,6 +290,11 @@ namespace RemoteApi {
     }
 
     Response Router::forbidden() {
+        if (CurrentOverlay().headless) {
+            return Response::Error(403, QStringLiteral("forbidden"),
+                                   QStringLiteral("Management requests are accepted only from this device. Start Throne with "
+                                                  "--api-admin-lan (or THRONE_API_ADMIN_LAN=1) to accept them from the local network."));
+        }
         return Response::Error(403, QStringLiteral("forbidden"),
                                QStringLiteral("Management requests are accepted only from this device. Allow management from the local "
                                               "network in Throne's Throne API settings to accept them from the LAN."));
@@ -451,15 +482,21 @@ namespace RemoteApi {
         const auto &settings = Configs::dataManager->settingsRepo;
         const auto running = engine_->runningSnapshot();
         const auto route = Configs::dataManager->routesRepo->GetRouteProfile(settings->current_route_id);
-        const auto admin = Configs::KnownAdmin();
+        const auto degraded = engine_->degradedReason();
+        // Empty while this instance's Tun is on.
+        const auto tunConflict = engine_->tunBlockedReason();
         return {
             {"state", RouterImpl::connectionStateName(engine_->connectionState())},
             {"profile", running != nullptr ? QJsonValue(profileJson(running)) : QJsonValue()},
             {"last_profile_id", engine_->resolveLastProfile()},
             {"tun", settings->spmode_vpn},
+            {"tun_conflict", tunConflict.isEmpty() ? QJsonValue() : QJsonValue(tunConflict)},
             {"system_proxy", settings->spmode_system_proxy},
             {"route", route != nullptr ? QJsonValue(routeJson(*route)) : QJsonValue()},
             {"kill_switch", RouterImpl::killSwitchName()},
+            {"kill_switch_error", RouterImpl::killSwitchName() == QLatin1String("failed") && !Sys::KillSwitch::instance()->failureCode().isEmpty()
+                                       ? QJsonValue(Sys::KillSwitch::instance()->failureCode())
+                                       : QJsonValue()},
             {"core", settings->core_running},
             {"inbound", QJsonObject{
                 {"enabled", !settings->disable_mixed_inbound},
@@ -467,13 +504,12 @@ namespace RemoteApi {
                 {"port", settings->inbound_socks_port},
             }},
             {"capabilities", QJsonObject{
-                // null until the core answers the privilege probe, rather than a false that is not known yet.
-                {"tun", settings->disable_privilege_req ? QJsonValue(true) : admin ? QJsonValue(*admin) : QJsonValue()},
-                {"kill_switch", RouterImpl::killSwitchSupported()},
+                {"tun", RouterImpl::tunCapability()},
+                {"kill_switch", RouterImpl::killSwitchCapability()},
                 {"headless", !IsGuiApp()},
             }},
             {"restart_needed", engine_->restartPending()},
-            {"degraded", RouterImpl::degradedReason()},
+            {"degraded", degraded.isEmpty() ? QJsonValue() : QJsonValue(degraded)},
             {"version", QStringLiteral(NKR_VERSION)},
         };
     }
@@ -845,10 +881,19 @@ namespace RemoteApi {
             respond(error);
             return;
         }
+        if (systemProxy.has_value() && *systemProxy && !engine_->systemProxySupported()) {
+            respond(Response::Error(409, QStringLiteral("system_proxy_unsupported"),
+                                    QStringLiteral("Headless Throne does not set the system proxy; point applications at its inbound")));
+            return;
+        }
         const auto &settings = Configs::dataManager->settingsRepo;
         const bool proxyChanges = systemProxy.has_value() && *systemProxy != settings->spmode_system_proxy;
         const bool tunChanges = tun.has_value() && *tun != settings->spmode_vpn;
+        // A Tun restore the boot held leaves spmode_vpn false, so tun:false would otherwise be a no-op that keeps the hold.
+        const bool clearHeldTun = tun.has_value() && !*tun && !tunChanges && engine_->tunRestoreHeld();
+        const auto releaseHeldTun = [this] { engine_->setTun(false, Engine::ModeChange{.interactive = false, .restart = false}); };
         if (!proxyChanges && !tunChanges) {
+            if (clearHeldTun) releaseHeldTun();
             respond(Response::Ok(statusJson()));
             return;
         }
@@ -857,10 +902,17 @@ namespace RemoteApi {
                                     QStringLiteral("The system proxy needs Throne's mixed inbound, which is turned off")));
             return;
         }
-        if (tunChanges && *tun && !Configs::IsAdmin() && !settings->disable_privilege_req) {
-            respond(Response::Error(412, QStringLiteral("needs_privileges"),
-                                    QStringLiteral("Tun needs privileges that Throne does not have; grant them in Throne once")));
+        if (tunChanges && *tun) Configs::RefreshStaleTunDevice(RouterImpl::kTunCapsRefreshMs);
+        if (tunChanges && *tun && !settings->disable_privilege_req &&
+            (!engine_->tunPrivileged() || RouterImpl::tunCapability() == QJsonValue(false))) {
+            respond(Response::Error(412, QStringLiteral("needs_privileges"), RouterImpl::tunPrivilegeMessage()));
             return;
+        }
+        if (tunChanges && *tun) {
+            if (const auto conflict = engine_->tunBlockedReason(); !conflict.isEmpty()) {
+                respond(Response::Error(409, QStringLiteral("tun_conflict"), conflict));
+                return;
+            }
         }
         if (connectionBusy()) {
             respond(RouterImpl::busyConnection());
@@ -869,6 +921,7 @@ namespace RemoteApi {
         // System proxy first so that a Tun restart picks it up; at most one of the two restarts.
         applyWithRestart(options, respond, [&](quint64 serial) {
             bool restarted = false;
+            if (clearHeldTun) releaseHeldTun();
             if (proxyChanges) {
                 restarted = engine_->setSystemProxy(
                     *systemProxy, Engine::ModeChange{.interactive = false, .restart = !tunChanges, .restartSerial = serial});

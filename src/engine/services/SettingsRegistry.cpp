@@ -1,5 +1,6 @@
 #include "include/engine/services/SettingsRegistry.h"
 
+#include <QHostAddress>
 #include <QJsonValue>
 #include <QList>
 #include <QSet>
@@ -10,6 +11,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "include/api/remote/Overlay.hpp"
 #include "include/configs/generate.h"
 #include "include/engine/EditLocks.h"
 #include "include/engine/EngineEvents.h"
@@ -191,6 +193,23 @@ namespace Engine::SettingsRegistryImpl {
                 }};
     }
 
+    // API 0 = off. Stored <= 0 is off; turning it off stores the port negated, as the defaults do, to keep it for later.
+    Key portOrOffKey(const QString &name, int Settings::*member, Restart restart) {
+        return {name, restart, NoEffect,
+                [member](const Settings &settings) { return QJsonValue(settings.*member > 0 ? settings.*member : 0); },
+                [name](const QJsonValue &value) {
+                    qint64 port = 0;
+                    if (!wholeNumber(value, &port)) return QStringLiteral("\"%1\" must be an integer").arg(name);
+                    if (port < 0 || port > 65535) return QStringLiteral("\"%1\" must be 0 (off) or from 1 to 65535").arg(name);
+                    return QString();
+                },
+                [name, member](const QJsonValue &value, Patch *patch) {
+                    const int port = static_cast<int>(value.toDouble());
+                    const int stored = patch->value(member);
+                    patch->set(name, member, port != 0 ? port : (stored > 0 ? -stored : stored));
+                }};
+    }
+
     const QList<Key> &keys() {
         static const QList<Key> table = [] {
             const QStringList http = {QStringLiteral("http"), QStringLiteral("https")};
@@ -227,6 +246,23 @@ namespace Engine::SettingsRegistryImpl {
 #endif
             list << intKey(QStringLiteral("tun_mtu"), &Settings::vpn_mtu, 1000, 10000, Restart::Tun, ApplyKillSwitch);
             list << boolKey(QStringLiteral("tun_ipv6"), &Settings::vpn_ipv6, Restart::Tun, ApplyKillSwitch);
+            auto tunIpv4Cidr = stringKey(QStringLiteral("tun_ipv4_cidr"), &Settings::vpn_tun_ipv4_cidr, Restart::Tun,
+                                         [](const QString &text) { return Validation::Cidr(text, Validation::Family::V4).isEmpty(); },
+                                         QStringLiteral("must be an IPv4 address with a prefix length, such as 172.19.0.1/24"));
+            tunIpv4Cidr.effects = ApplyKillSwitch;
+            list << tunIpv4Cidr;
+            auto tunIpv6Cidr = stringKey(QStringLiteral("tun_ipv6_cidr"), &Settings::vpn_tun_ipv6_cidr, Restart::Tun,
+                                         [](const QString &text) { return Validation::Cidr(text, Validation::Family::V6).isEmpty(); },
+                                         QStringLiteral("must be an IPv6 address with a prefix length, such as fdfe:dcba:9876::1/96"));
+            tunIpv6Cidr.effects = ApplyKillSwitch;
+            list << tunIpv6Cidr;
+
+            list << intKey(QStringLiteral("dns_in_port"), &Settings::core_dns_in_port, 1, 65535, Restart::Profile);
+            list << portOrOffKey(QStringLiteral("clash_api_port"), &Settings::core_box_clash_api, Restart::Profile);
+            list << stringKey(QStringLiteral("clash_listen_addr"), &Settings::core_box_clash_listen_addr, Restart::Profile,
+                              [](const QString &text) { return Validation::Host(text, Validation::Empty::Allowed).isEmpty(); },
+                              QStringLiteral("must be empty (127.0.0.1) or a host name or IP address, without a scheme, port or spaces"));
+            list << portOrOffKey(QStringLiteral("singbox_api_port"), &Settings::core_box_api_port, Restart::Profile);
 
             const auto dnsAddress = [](const QString &text) { return Configs::ParseDnsAddress(text, nullptr); };
             const auto dnsRule = QStringLiteral("must be a DNS address: local, dhcp://auto, dhcp://<interface>, udp|tcp|tls|quic://host[:port], "
@@ -253,22 +289,70 @@ namespace Engine::SettingsRegistryImpl {
         return nullptr;
     }
 
-    // The settings dialog's port rule, plus the Throne API's own listener.
-    QString inboundPortConflict(const Patch &pending, const Settings &settings) {
-        if (!pending.changes(&Settings::inbound_socks_port)) return {};
-        const int port = pending.value(&Settings::inbound_socks_port);
-        QString user;
-        if (port == settings.core_dns_in_port) {
-            user = QStringLiteral("the core's DNS server");
-        } else if (settings.core_box_clash_api > 0 && port == settings.core_box_clash_api) {
-            user = QStringLiteral("the Clash API");
-        } else if (settings.core_box_api_port > 0 && port == settings.core_box_api_port) {
-            user = QStringLiteral("the sing-box API");
-        } else if (settings.remote_api_enable && port == settings.remote_api_port) {
-            user = QStringLiteral("the Throne API");
+    struct PortUser {
+        QString key;
+        int Settings::*member;
+        QString label;
+    };
+
+    // The settings dialog's port rule over the pending values, for each port this PUT changes or brings back into use, plus the
+    // Throne API's own listener.
+    QString portConflict(const Patch &pending) {
+        const QList<PortUser> users = {
+            {QStringLiteral("inbound_port"), &Settings::inbound_socks_port, QStringLiteral("the mixed inbound (inbound_port)")},
+            {QStringLiteral("dns_in_port"), &Settings::core_dns_in_port, QStringLiteral("the core's DNS server (dns_in_port)")},
+            {QStringLiteral("clash_api_port"), &Settings::core_box_clash_api, QStringLiteral("the Clash API (clash_api_port)")},
+            {QStringLiteral("singbox_api_port"), &Settings::core_box_api_port, QStringLiteral("the sing-box API (singbox_api_port)")},
+        };
+        const bool mixedOn = !pending.value(&Settings::disable_mixed_inbound) && !pending.value(&Settings::random_inbound_port);
+        const bool mixedTurnsOn =
+            mixedOn && (pending.changes(&Settings::disable_mixed_inbound) || pending.changes(&Settings::random_inbound_port));
+        const auto inUse = [&pending, mixedOn](const PortUser &user) {
+            return pending.value(user.member) > 0 && (user.member != &Settings::inbound_socks_port || mixedOn);
+        };
+        for (const auto &user : users) {
+            // While the mixed inbound was off, other ports could take its stored port unchecked.
+            const bool reenabled = user.member == &Settings::inbound_socks_port && mixedTurnsOn && !pending.changes(user.member);
+            if (!pending.changes(user.member) && !reenabled) continue;
+            const int port = pending.value(user.member);
+            if (port <= 0) continue;
+            QString holder;
+            for (const auto &other : users) {
+                if (other.member != user.member && inUse(other) && pending.value(other.member) == port) {
+                    holder = other.label;
+                    break;
+                }
+            }
+            if (const auto api = RemoteApi::EffectiveConfig().config; holder.isEmpty() && api.enabled && port == api.port) {
+                holder = QStringLiteral("the Throne API");
+            }
+            if (!holder.isEmpty() && reenabled) {
+                return QStringLiteral("\"inbound_enabled\" would turn the mixed inbound on at port %1, which %2 already uses; choose a "
+                                      "different inbound_port")
+                    .arg(QString::number(port), holder);
+            }
+            if (!holder.isEmpty()) {
+                return QStringLiteral("\"%1\" %2 is already used by %3; choose a different port")
+                    .arg(user.key, QString::number(port), holder);
+            }
         }
-        if (user.isEmpty()) return {};
-        return QStringLiteral("\"inbound_port\" %1 is already used by %2; choose a different port").arg(QString::number(port), user);
+        return {};
+    }
+
+    // The Clash API secret is set only in the GUI, so the API never opens the Clash API to other hosts without one.
+    QString clashExposure(const Patch &pending, const Settings &settings) {
+        if (!pending.touches(QStringLiteral("clash_api_port")) && !pending.touches(QStringLiteral("clash_listen_addr"))) return {};
+        if (pending.value(&Settings::core_box_clash_api) <= 0 || !settings.core_box_clash_api_secret.isEmpty()) return {};
+        // Already on at this address: moving its port opens nothing new.
+        if (settings.core_box_clash_api > 0 && !pending.changes(&Settings::core_box_clash_listen_addr)) return {};
+        QString host = pending.value(&Settings::core_box_clash_listen_addr);
+        if (host.startsWith(QLatin1Char('[')) && host.endsWith(QLatin1Char(']'))) host = host.mid(1, host.size() - 2);
+        if (host.isEmpty() || host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0 || QHostAddress(host).isLoopback()) {
+            return {};
+        }
+        return QStringLiteral("\"clash_listen_addr\" %1 would open the Clash API to other hosts without a secret; keep it on 127.0.0.1, "
+                              "or set the Clash API secret in Throne's settings first")
+            .arg(host);
     }
 } // namespace Engine::SettingsRegistryImpl
 
@@ -303,7 +387,10 @@ namespace Engine::SettingsRegistry {
             key->set(value, &pending);
         }
 
-        if (const auto problem = SettingsRegistryImpl::inboundPortConflict(pending, settings); !problem.isEmpty()) {
+        if (const auto problem = SettingsRegistryImpl::portConflict(pending); !problem.isEmpty()) {
+            return SettingsRegistryImpl::badRequest(problem);
+        }
+        if (const auto problem = SettingsRegistryImpl::clashExposure(pending, settings); !problem.isEmpty()) {
             return SettingsRegistryImpl::badRequest(problem);
         }
         if (context.systemProxyOn && pending.changes(&Settings::disable_mixed_inbound) && pending.value(&Settings::disable_mixed_inbound)) {

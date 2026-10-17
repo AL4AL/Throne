@@ -7,9 +7,12 @@
 #include "include/global/Configs.hpp"
 #include "include/global/Logger.hpp"
 #include "include/global/Notice.hpp"
+#include "include/sys/KillSwitch.hpp"
 #include "include/sys/Process.hpp"
 
 #include <functional>
+#include <memory>
+#include <optional>
 #include <utility>
 
 #include <QCoreApplication>
@@ -18,6 +21,7 @@
 #include <QLocalSocket>
 #include <QMutexLocker>
 #include <QPointer>
+#include <QRegularExpression>
 #include <QTimer>
 #include <QUuid>
 
@@ -52,6 +56,77 @@ namespace {
                                 "Windows then ignores the adapter binding that keeps Throne's own connections out of the Tun, so they loop back into it and fail.\n\n"
                                 "To fix this, share the hotspot from the throne-tun adapter instead of \"%1\" (Settings > Mobile hotspot > Share my internet connection from), or turn the hotspot off while using Tun mode.")
                         .arg(adapter)});
+    }
+
+    // Main thread: the full reply onPrivilegeProbed is handling (its signature carries only the privileged bit).
+    std::optional<API::PrivilegeInfo> coreSupervisorProbeReply;
+
+    constexpr qsizetype kCoreSupervisorErrorMaxChars = 300;
+    constexpr qsizetype kCoreSupervisorStderrLineCap = 4096;
+
+    // DS_cores only: one core generation's stderr, reassembled into lines across reads.
+    struct CoreSupervisorStderrTail {
+        quint64 gen = 0;
+        QByteArray partial;
+        QString panic;
+        QString last;
+    };
+
+    bool coreSupervisorIsPanicLine(const QString &line) {
+        return line.startsWith(QLatin1String("Core panicked:")) || line.startsWith(QLatin1String("panic:")) ||
+               line.startsWith(QLatin1String("fatal error:"));
+    }
+
+    QString coreSupervisorOneLine(QString text) {
+        for (auto &c : text) {
+            if (c.category() == QChar::Other_Control) c = u' ';
+        }
+        text = text.simplified();
+        if (text.size() > kCoreSupervisorErrorMaxChars) text = text.left(kCoreSupervisorErrorMaxChars - 3) + QStringLiteral("...");
+        return text;
+    }
+
+    // Keeps the first panic line, else the last unindented line that is no goroutine header or register dump.
+    void coreSupervisorNoteStderrLine(CoreSupervisorStderrTail &tail, QByteArray line) {
+        if (!tail.panic.isEmpty()) return;
+        if (line.endsWith('\r')) line.chop(1);
+        if (line.isEmpty() || line.startsWith(' ') || line.startsWith('\t')) return;
+        static const QRegularExpression goLogStamp(QStringLiteral(R"(^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(\.\d+)? )"));
+        static const QRegularExpression registerDump(QStringLiteral(R"(^[a-z][a-z0-9]{0,7}\s+0x[0-9a-f]+$)"));
+        QString text = QString::fromUtf8(line);
+        text.remove(goLogStamp);
+        text = coreSupervisorOneLine(text);
+        if (text.isEmpty()) return;
+        if (coreSupervisorIsPanicLine(text)) {
+            tail.panic = text;
+            return;
+        }
+        if (text.startsWith(QLatin1String("goroutine ")) || registerDump.match(text).hasMatch()) return;
+        tail.last = text;
+    }
+
+    void coreSupervisorFeedStderr(CoreSupervisorStderrTail &tail, quint64 gen, const QByteArray &chunk) {
+        if (tail.gen != gen) tail = CoreSupervisorStderrTail{gen};
+        if (!tail.panic.isEmpty()) return;
+        tail.partial += chunk;
+        qsizetype from = 0;
+        for (qsizetype end = tail.partial.indexOf('\n'); end >= 0; end = tail.partial.indexOf('\n', from)) {
+            coreSupervisorNoteStderrLine(tail, tail.partial.mid(from, end - from));
+            from = end + 1;
+        }
+        tail.partial.remove(0, from);
+        if (tail.partial.size() > kCoreSupervisorStderrLineCap) tail.partial.clear();
+    }
+
+    // At the exit of generation gen: its cause line, empty when it said nothing usable.
+    QString coreSupervisorStderrCause(CoreSupervisorStderrTail &tail, quint64 gen) {
+        if (tail.gen != gen) return {};
+        if (!tail.partial.isEmpty()) {
+            const QByteArray rest = tail.partial;
+            tail.partial.clear();
+            coreSupervisorNoteStderrLine(tail, rest);
+        }
+        return tail.panic.isEmpty() ? tail.last : tail.panic;
     }
 } // namespace
 
@@ -113,16 +188,29 @@ namespace Engine {
             DS_cores);
     }
 
-    void CoreSupervisor::shutdown() {
+    void CoreSupervisor::shutdown(int killWaitMs) {
         // First: a restart firing inside the nested wait below would spawn a core during the exit.
         setState(CoreState::ShuttingDown);
         m_probing = false;
         m_restartTimer->stop();
         m_connectTimer->stop();
-        runOnThread([this] {
-            if (m_process) m_process->Kill();
+        runOnThread([this, killWaitMs] {
+            if (m_process) m_process->Kill(killWaitMs);
         }, DS_cores, true);
         if (m_server) m_server->close();
+    }
+
+    void CoreSupervisor::killForExit() {
+        ENGINE_CHECK_MAIN_THREAD();
+        setState(CoreState::ShuttingDown);
+        m_probing = false;
+        m_restartTimer->stop();
+        m_connectTimer->stop();
+        runOnThread([this] {
+            if (!m_process) return;
+            Configs_sys::KillChildGroup(m_process);
+            m_process->kill();
+        }, DS_cores);
     }
 
     bool CoreSupervisor::resetCore() {
@@ -191,6 +279,7 @@ namespace Engine {
         ENGINE_CHECK_MAIN_THREAD();
         m_startWhenUp = -1;
         Configs::dataManager->settingsRepo->started_id = Configs::NoProfileId;
+        emit resumeCancelled();
     }
 
     bool CoreSupervisor::awaitingCoreStarted() const {
@@ -214,15 +303,29 @@ namespace Engine {
         return m_lastFailure;
     }
 
+    QString CoreSupervisor::lastCoreError() const {
+        return m_lastCoreError;
+    }
+
     qint64 CoreSupervisor::corePid() const {
         QMutexLocker lock(&m_processMutex);
         return m_process ? m_process->processId() : 0;
+    }
+
+    int CoreSupervisor::restartCount() const {
+        return m_restartCount;
+    }
+
+    int CoreSupervisor::consecutiveFailures() const {
+        return m_failures;
     }
 
     bool CoreSupervisor::runningWithoutGuardIdentity() const {
 #ifdef Q_OS_WIN
         return false;
 #else
+        // A restart for the guard could never give it the identity here.
+        if (Sys::KillSwitch::instance()->identityUnsupported()) return false;
         QMutexLocker lock(&m_processMutex);
         return m_process != nullptr && Configs::dataManager->settingsRepo->core_running && !m_process->guard_identity;
 #endif
@@ -307,10 +410,13 @@ namespace Engine {
         const QPointer<CoreSupervisor> self(this);
         runOnNewThread([self, gen, attempt] {
             bool ok = false;
-            const bool privileged = API::defaultClient->IsPrivileged(&ok, kPrivilegeProbeTimeoutMs);
+            const API::PrivilegeInfo info = API::defaultClient->Privileges(&ok, kPrivilegeProbeTimeoutMs);
             // Posted to the application object, not to self: QPointer is only safe to dereference on the main thread.
-            QMetaObject::invokeMethod(QCoreApplication::instance(), [self, gen, ok, privileged, attempt] {
-                if (self) self->onPrivilegeProbed(gen, ok, privileged, attempt);
+            QMetaObject::invokeMethod(QCoreApplication::instance(), [self, gen, ok, info, attempt] {
+                if (!self) return;
+                coreSupervisorProbeReply = info;
+                self->onPrivilegeProbed(gen, ok, info.privileged, attempt);
+                coreSupervisorProbeReply.reset();
             }, Qt::QueuedConnection);
         });
     }
@@ -321,8 +427,13 @@ namespace Engine {
         // A dropped channel means the core is exiting (it never redials); its exit report settles the pending start.
         if (!ok && !API::defaultClient->IsConnected()) return;
         // On failure the old answer stays cached, as IsAdmin(true) keeps it.
-        if (ok) Configs::SetKnownAdmin(privileged);
+        if (ok) {
+            Configs::SetKnownAdmin(privileged);
+            if (coreSupervisorProbeReply) Configs::SetKnownCapabilities(*coreSupervisorProbeReply);
+        }
         QString elevated = QString("elevated: %1").arg(ok && privileged ? "yes" : "no");
+        if (ok && coreSupervisorProbeReply && !coreSupervisorProbeReply->detail.isEmpty())
+            elevated += QString(" (%1)").arg(coreSupervisorProbeReply->detail);
         if (attempt > 0) elevated += QString(" (retry %1)").arg(attempt);
         LOG_INFO(elevated);
         if (!ok && attempt < kPrivilegeProbeRetries) {
@@ -349,13 +460,15 @@ namespace Engine {
 
     void CoreSupervisor::attachProcess(Configs_sys::CoreProcess *process) {
         const QPointer<CoreSupervisor> self(this);
-        const auto postExit = [self](quint64 gen, bool failedToStart) {
+        const auto postExit = [self](quint64 gen, bool failedToStart, int exitCode, const QString &cause) {
             if (auto *supervisor = self.data()) {
-                QMetaObject::invokeMethod(supervisor, [supervisor, gen, failedToStart] {
-                    supervisor->onCoreExited(gen, failedToStart);
+                QMetaObject::invokeMethod(supervisor, [supervisor, gen, failedToStart, exitCode, cause] {
+                    supervisor->noteCoreError(gen, cause);
+                    supervisor->onCoreExited(gen, failedToStart, exitCode);
                 }, Qt::QueuedConnection);
             }
         };
+        const auto stderrTail = std::make_shared<CoreSupervisorStderrTail>();
         // The process is the context, so every handler runs on DS_cores, where the process lives.
         connect(process, &QProcess::readyReadStandardOutput, process, [this, process] {
             auto log = process->readAllStandardOutput();
@@ -376,9 +489,10 @@ namespace Engine {
             if (linesBefore > Configs::dataManager->settingsRepo->max_log_line) return;
             MW_show_log(log);
         });
-        connect(process, &QProcess::readyReadStandardError, process, [process] {
-            auto log = process->readAllStandardError().trimmed();
-            MW_show_log(log);
+        connect(process, &QProcess::readyReadStandardError, process, [process, stderrTail] {
+            const auto log = process->readAllStandardError();
+            coreSupervisorFeedStderr(*stderrTail, process->generation.load(), log);
+            MW_show_log(log.trimmed());
         });
         connect(process, &QProcess::started, process, [self, process] {
             const quint64 gen = process->generation.load();
@@ -393,7 +507,7 @@ namespace Engine {
             }
             LOG_ERROR(QString("core process error %1: %2").arg(static_cast<int>(error)).arg(process->errorString()));
             // A start failing inside Restart() on Windows reports only here: stateChanged then still sees restarting.
-            if (error == QProcess::FailedToStart) postExit(process->generation.load(), true);
+            if (error == QProcess::FailedToStart) postExit(process->generation.load(), true, -1, coreSupervisorOneLine(process->errorString()));
         });
         connect(process, &QProcess::finished, process, [](int exitCode, QProcess::ExitStatus exitStatus) {
             const bool crashed = exitStatus == QProcess::CrashExit || exitCode != 0;
@@ -403,25 +517,34 @@ namespace Engine {
                                .arg(exitStatus == QProcess::CrashExit ? "crash" : "normal")
                                .arg(Configs::dataManager->settingsRepo->prepare_exit ? " (during shutdown)" : ""));
         });
-        connect(process, &QProcess::stateChanged, process, [process, postExit](QProcess::ProcessState state) {
+        const auto runningGen = std::make_shared<quint64>(0);
+        connect(process, &QProcess::stateChanged, process, [process, postExit, stderrTail, runningGen](QProcess::ProcessState state) {
+            if (state == QProcess::Running) {
+                *runningGen = process->generation.load();
+                return;
+            }
+            if (state != QProcess::NotRunning) return;
             // Read first: a Restart() queued behind the blocking cleanup below runs inside its nested loop.
             const quint64 gen = process->generation.load();
+            // Whether the process that just stopped reached Running; a core outliving Restart()'s wait is still reported (under the new gen).
+            const bool reachedRunning = std::exchange(*runningGen, quint64(0)) != 0;
             const bool failedToStart = process->failed_to_start;
-            if (state == QProcess::NotRunning) {
-                Configs::dataManager->settingsRepo->core_running = false;
-                qDebug() << "Core stated changed to not running";
+            // QProcess stores the exit status before it reports NotRunning.
+            const int exitCode = failedToStart || process->exitStatus() == QProcess::CrashExit ? -1 : process->exitCode();
+            const QString cause = failedToStart ? coreSupervisorOneLine(process->errorString()) : coreSupervisorStderrCause(*stderrTail, gen);
+            Configs::dataManager->settingsRepo->core_running = false;
+            qDebug() << "Core stated changed to not running";
+
+            if (Configs::dataManager->settingsRepo->prepare_exit || process->restarting) return;
+
+            if (!failedToStart) {
+                MW_show_log("[Fatal] " + QObject::tr("Core exited, cleaning up..."));
+
+                Lifecycle::StopRunningProfile(true, true, false);
             }
-
-            if (!Configs::dataManager->settingsRepo->prepare_exit && state == QProcess::NotRunning) {
-                if (process->restarting) return;
-
-                if (!failedToStart) {
-                    MW_show_log("[Fatal] " + QObject::tr("Core exited, cleaning up..."));
-
-                    Lifecycle::StopRunningProfile(true, true, false);
-                }
-                postExit(gen, failedToStart);
-            }
+            // Unix reports a failed exec as NotRunning before errorOccurred(FailedToStart), which posts it with errorString().
+            if (!failedToStart && !reachedRunning) return;
+            postExit(gen, failedToStart, exitCode, cause);
         });
     }
 
@@ -444,7 +567,16 @@ namespace Engine {
         }, DS_cores);
     }
 
-    void CoreSupervisor::onCoreExited(quint64 gen, bool failedToStart) {
+    void CoreSupervisor::noteCoreError(quint64 gen, const QString &line) {
+        // A replaced core's late report and an intentional kill say nothing about why the core fails.
+        if (gen <= m_handledExitGen || gen < m_lastCoreErrorGen || m_expectedExitGen.load() == gen) return;
+        m_lastCoreErrorGen = gen;
+        m_lastCoreError = gen == m_timedOutGen && !coreSupervisorIsPanicLine(line)
+                              ? QStringLiteral("did not connect within %1 s").arg(kConnectTimeoutMs / 1000)
+                              : line;
+    }
+
+    void CoreSupervisor::onCoreExited(quint64 gen, bool failedToStart, int exitCode) {
         // stateChanged and errorOccurred can both report one exit, in a platform-dependent order.
         if (gen <= m_handledExitGen) return;
         m_handledExitGen = gen;
@@ -466,6 +598,18 @@ namespace Engine {
         }
 
         const bool wasConnected = !failedToStart && gen == m_acceptedGen && !wasProbing;
+        auto *killSwitch = Sys::KillSwitch::instance();
+        if (!wasConnected && exitCode == Sys::KillSwitch::kCoreIdentityExitCode && !killSwitch->identityUnsupported()) {
+            // Not a start failure: the kill switch fails closed instead, and the next spawn omits THRONE_GUARD.
+            const QString detail = m_lastCoreErrorGen == gen && !m_lastCoreError.isEmpty()
+                                       ? m_lastCoreError
+                                       : QStringLiteral("kill switch: cannot adopt the guard group");
+            killSwitch->noteIdentityUnsupported(detail);
+            LOG_WARN(QStringLiteral("[Core] The core cannot adopt the kill-switch group (%1); restarting it without the guard identity").arg(detail));
+            MW_show_log("[Warn] " + QObject::tr("Restarting the core ..."));
+            scheduleRestart(kIntentRestartDelayMs);
+            return;
+        }
         if (wasConnected && m_connectedAt.isValid() && m_connectedAt.elapsed() >= kStableMs) m_failures = 0;
         ++m_failures;
         if (!wasConnected) ++m_startFailures;
@@ -491,10 +635,19 @@ namespace Engine {
             }
         }
 
+        emit coreExited(wasConnected);
+
         if ((m_failures >= kGiveUpAfter && m_startWhenUp < 0) || (!wasConnected && m_startFailures >= kGiveUpAfter)) {
             m_startWhenUp = -1;
             settings->started_id = Configs::NoProfileId;
-            m_lastFailure = tr("The core keeps exiting, so it is no longer restarted. Use Restart Core to try again.");
+            if (IsGuiApp()) {
+                m_lastFailure = tr("The core keeps exiting, so it is no longer restarted. Use Restart Core to try again.");
+            } else {
+                m_lastFailure = !wasConnected && m_startFailures >= kGiveUpAfter
+                                    ? QStringLiteral("the core exited %1 times without connecting").arg(m_startFailures)
+                                    : QStringLiteral("the core kept exiting");
+                if (m_lastCoreErrorGen == gen && !m_lastCoreError.isEmpty()) m_lastFailure += QStringLiteral("; last error: ") + m_lastCoreError;
+            }
             MW_show_log("[ERROR] " + m_lastFailure);
             setState(CoreState::GaveUp);
             emit coreGaveUp(m_lastFailure);
@@ -532,12 +685,14 @@ namespace Engine {
         m_failures = 0;
         m_startFailures = 0;
         m_lastFailure.clear();
+        m_lastCoreError.clear();
         setState(CoreState::Starting);
     }
 
     void CoreSupervisor::postProcessRestart(const std::function<void()> &before) {
         // Restart() silences the replaced core's exit, so a report of it still on the way is moot.
         m_handledExitGen = qMax(m_handledExitGen, currentGeneration());
+        ++m_restartCount;
         runOnThread([this, before] {
             if (!m_process || Configs::dataManager->settingsRepo->prepare_exit) return;
             if (before) before();

@@ -22,6 +22,7 @@
 #include "include/database/RoutesRepo.h"
 #include "include/engine/app/Bootstrap.h"
 #include "include/engine/app/DataDirLock.h"
+#include "include/engine/app/ExitCodes.h"
 #include "include/engine/app/InstanceServer.h"
 #include "include/global/Configs.hpp"
 #include "include/global/Logger.hpp"
@@ -188,11 +189,6 @@ namespace Engine {
 #endif
         }
 
-        QString DescribeOwner(const QJsonObject &owner) {
-            if (owner.isEmpty()) return "owner unknown";
-            return QString("pid %1, mode %2").arg(owner.value("pid").toInteger()).arg(owner.value("mode").toString());
-        }
-
         class Dumper {
         public:
             explicit Dumper(const QDir &outDir) : out(outDir) {}
@@ -315,13 +311,13 @@ namespace Engine {
         };
         if (!hasValue(flagIndex) || !hasValue(appdataIndex)) {
             PrintError("usage: Throne -dump-configs <outdir> -appdata <dir>   (<dir> should be a copy of a data directory)");
-            return 64;
+            return ExitCode::Usage;
         }
         const QDir outDir(QDir::cleanPath(launchCwd.absoluteFilePath(arguments.at(flagIndex + 1))));
         const QString appdataPath = QDir::cleanPath(launchCwd.absoluteFilePath(arguments.at(appdataIndex + 1)));
         if (const auto dbPath = QDir(appdataPath).absoluteFilePath("config/throne.db"); !QFileInfo(dbPath).isFile()) {
             PrintError(QString("-dump-configs: no database at %1").arg(QDir::toNativeSeparators(dbPath)));
-            return 66;
+            return ExitCode::NoInput;
         }
         arguments[appdataIndex + 1] = appdataPath;
         PrintError("-dump-configs: run this on a COPY of the data directory, opening the database may migrate it.");
@@ -332,9 +328,9 @@ namespace Engine {
         DataDirLock lock;
         switch (lock.tryAcquire(dataDir.configDir, "dump-configs")) {
             case DataDirLock::Result::Busy:
-                PrintError(QString("-dump-configs: %1 is in use by another Throne (%2)")
-                               .arg(dataDir.wd.absolutePath(), DescribeOwner(DataDirLock::ReadOwner(dataDir.configDir))));
-                return 3;
+                PrintError(QString("-dump-configs: %1 is in use by %2")
+                               .arg(dataDir.wd.absolutePath(), DataDirLock::DescribeOwner(DataDirLock::ReadOwner(dataDir.configDir))));
+                return ExitCode::DataDirOwned;
             case DataDirLock::Result::Failed:
                 LOG_WARN("-dump-configs: continuing without the data dir lock: " + lock.errorString());
                 break;
@@ -345,14 +341,14 @@ namespace Engine {
         // A Throne older than the lock, or a failed lock, leaves the instance socket as the only sign of a live owner.
         if (InstanceServer::HandOff(Bootstrap::InstanceServerName(dataDir.wd), {})) {
             PrintError(QString("-dump-configs: a running Throne owns %1").arg(dataDir.wd.absolutePath()));
-            return 3;
+            return ExitCode::DataDirOwned;
         }
 
         if (!QDir().mkpath(outDir.absolutePath())) {
             PrintError(QString("-dump-configs: could not create %1").arg(outDir.absolutePath()));
-            return 73;
+            return ExitCode::CantCreate;
         }
-        if (!RemovePreviousDump(outDir)) return 73;
+        if (!RemovePreviousDump(outDir)) return ExitCode::CantCreate;
 
         QDir::setCurrent(dataDir.configDir);
         Configs::initDB(QString(QDir::currentPath() + QDir::separator() + "throne.db").toStdString());
@@ -442,6 +438,6 @@ namespace Engine {
         dumper.write("manifest.json", Manifest(profilesOut, routeEntries, routeProfileId, currentRouteId));
         LOG_INFO(QString("-dump-configs: %1 profiles, %2 routes written to %3")
                      .arg(profilesOut.size()).arg(routeEntries.size()).arg(outDir.absolutePath()));
-        return dumper.writeFailures > 0 ? 74 : 0;
+        return dumper.writeFailures > 0 ? ExitCode::IoError : ExitCode::Ok;
     }
 } // namespace Engine

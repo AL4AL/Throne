@@ -5,11 +5,19 @@
 #include <QTimer>
 
 #include "include/engine/EngineHost.h"
+#include "include/engine/app/ExitCodes.h"
+#include "include/engine/headless/HeadlessRuntime.h"
+#include "include/engine/vpn/VpnAuthController.h"
 #include "include/engine/vpn/VpnEndpoints.h"
 #include "include/global/Configs.hpp"
 #include "include/sys/KillSwitch.hpp"
 
 namespace Engine {
+    namespace {
+        // A sign-in prompt nothing here can answer is cancelled at its deadline, or after this when it names none.
+        constexpr int kHeadlessPolicyChallengeCapSec = 300;
+    } // namespace
+
     void HeadlessPolicy::geoAssetMissingCategory(const QString &contextName, const QString &needed, const QString &whichFile) {
         MW_show_log(QStringLiteral("[Geo assets] The Xray config \"%1\" needs \"%2\", which the installed %3 does not contain; "
                                    "point the GeoIP/GeoSite asset URL at a source that provides it.")
@@ -23,7 +31,7 @@ namespace Engine {
 
     void HeadlessPolicy::geoAssetDownloadFinished(const QString &error) {
         if (error.isEmpty()) {
-            MW_show_log(QStringLiteral("[Geo assets] Installed; the next start or test uses them."));
+            MW_show_log(QStringLiteral("[Geo assets] Installed; a start that failed for them is retried once."));
         } else {
             MW_show_log(QStringLiteral("[Geo assets] Download failed: %1").arg(error.trimmed()));
         }
@@ -32,7 +40,22 @@ namespace Engine {
     void HeadlessPolicy::killSwitchProblem() {
         const auto *killSwitch = Sys::KillSwitch::instance();
         if (killSwitch->state() != Sys::KillSwitch::State::Failed) return;
-        MW_show_log(QStringLiteral("[Kill switch] Not active: %1").arg(killSwitch->failureText()));
+        // failIdentity already logged "Profiles refused"; the guard still blocks, so "Not active" would be wrong.
+        if (killSwitch->failedForIdentity()) return;
+        QString hint;
+#if defined(Q_OS_WIN)
+        if (killSwitch->failedForPrivileges()) hint = QStringLiteral("run Throne as a service or elevated");
+#else
+        if (killSwitch->failedForPrivileges()) hint = QStringLiteral("it needs root (euid 0)");
+#endif
+#ifdef Q_OS_LINUX
+        // The core's guard reports a capabilities-only install as unsupported.
+        if (killSwitch->failureCode() == QStringLiteral("unsupported") && !killSwitch->identityUnsupported())
+            hint = QStringLiteral("a unit that grants capabilities instead of root cannot use it");
+#endif
+        MW_show_log(QStringLiteral("[Kill switch] Not active (%1): %2%3")
+                        .arg(killSwitch->failureCode(), killSwitch->failureText().simplified(),
+                             hint.isEmpty() ? QString() : QStringLiteral(" Hint: %1.").arg(hint)));
     }
 
     void HeadlessPolicy::killSwitchProblemResolved() {}
@@ -74,8 +97,14 @@ namespace Engine {
     }
 
     bool HeadlessPolicy::requestCorePrivileges() {
-        MW_show_log(QStringLiteral("The core lacks the privileges Tun needs: run Throne as root or as a service, "
-                                   "grant CAP_NET_ADMIN, or install a setuid core."));
+#if defined(Q_OS_WIN)
+        MW_show_log(QStringLiteral("The core lacks the privileges Tun needs: run Throne as a service or from an elevated prompt."));
+#elif defined(Q_OS_MACOS)
+        MW_show_log(QStringLiteral("The core lacks the privileges Tun needs: run Throne as a LaunchDaemon (root) or install a setuid core."));
+#else
+        MW_show_log(QStringLiteral("The core lacks the privileges Tun needs: run the unit as root, grant it CAP_NET_ADMIN, "
+                                   "or install a setuid core."));
+#endif
         return false;
     }
 
@@ -88,13 +117,16 @@ namespace Engine {
     }
 
     void HeadlessPolicy::vpnChallenge(const VpnAuthChallenge &challenge) {
-        MW_show_log(QStringLiteral("[VPN] %1 asks for a %2 sign-in that nothing here can answer; it lapses at its deadline.")
-                        .arg(Stats::VpnEndpointDisplayName(challenge.endpointTag), challenge.kind));
+        MW_show_log(QStringLiteral("[VPN] %1 asks for a %2 sign-in that nothing here can answer; it is cancelled at its deadline "
+                                   "(at most %3 s).")
+                        .arg(Stats::VpnEndpointDisplayName(challenge.endpointTag), challenge.kind)
+                        .arg(kHeadlessPolicyChallengeCapSec));
+        if (auto *engine = host()) engine->vpnAuth()->cancelAtDeadline(challenge, kHeadlessPolicyChallengeCapSec);
     }
 
     void HeadlessPolicy::vpnCredentialsRejected(int profileId, const VpnAuthChallenge &challenge,
                                                 const std::function<void(const QString &, const QString &)> &) {
-        MW_show_log(QStringLiteral("[VPN] %1 (profile %2) rejected the saved credentials; update them in the profile.")
+        MW_show_log(QStringLiteral("[VPN] %1 (profile %2) rejected the saved credentials; update them in the profile (status: vpn_auth_failed).")
                         .arg(Stats::VpnEndpointDisplayName(challenge.endpointTag), QString::number(profileId)));
     }
 
@@ -113,15 +145,23 @@ namespace Engine {
         MW_show_log(text);
     }
 
-    bool HeadlessPolicy::pickInsteadOfStart(int) {
-        return false;
-    }
-
     void HeadlessPolicy::exitProgram(ExitReason reason, bool) {
-        // A teardown already running: exit() here would end its nested waits early.
-        if (Configs::dataManager->settingsRepo->prepare_exit) return;
-        MW_show_log(reason == ExitReason::Restart ? QStringLiteral("Exiting to be restarted.") : QStringLiteral("Exiting."));
-        if (auto *engine = host()) engine->shutdown(false);
-        QCoreApplication::exit(reason == ExitReason::Restart ? 75 : 0);
+        switch (reason) {
+            case ExitReason::None:
+                HeadlessRuntime::RequestExit(ExitCode::Ok, QStringLiteral("shutdown requested"));
+                return;
+            case ExitReason::Restart:
+                HeadlessRuntime::RequestExit(ExitCode::Restart, QStringLiteral("restart requested"));
+                return;
+            case ExitReason::RunUpdater:
+                MW_show_log(QStringLiteral("Running the updater is not available in headless mode; ignored."));
+                return;
+            case ExitReason::RestartWithTun:
+                MW_show_log(QStringLiteral("Restarting with Tun is not available in headless mode; ignored."));
+                return;
+            case ExitReason::RestartElevated:
+                MW_show_log(QStringLiteral("Restarting elevated is not available in headless mode; ignored."));
+                return;
+        }
     }
 } // namespace Engine

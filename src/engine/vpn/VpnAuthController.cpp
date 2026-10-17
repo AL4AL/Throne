@@ -20,6 +20,8 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <limits>
+#include <utility>
 
 namespace {
     QString vpnAuthControllerFieldHaystack(const VpnAuthField &field) {
@@ -136,6 +138,38 @@ namespace Engine {
         return m_vpnEndpointState;
     }
 
+    void VpnAuthController::cancelAtDeadline(const VpnAuthChallenge &challenge, int capSec) {
+        ENGINE_CHECK_MAIN_THREAD();
+        if (challenge.id.isEmpty()) return;
+        const auto key = challenge.endpointTag + QChar(0x1F) + challenge.id;
+        if (!m_cancelTimers.value(key).isNull()) return;
+
+        qint64 delaySec = std::max(capSec, 0);
+        if (challenge.deadline > 0) {
+            delaySec = std::clamp<qint64>(challenge.deadline - QDateTime::currentSecsSinceEpoch(), 0, delaySec);
+        }
+        const auto tag = challenge.endpointTag;
+        const auto id = challenge.id;
+        auto *timer = new QTimer(this);
+        timer->setSingleShot(true);
+        timer->setInterval(static_cast<int>(std::min<qint64>(delaySec * 1000, std::numeric_limits<int>::max())));
+        connect(timer, &QTimer::timeout, this, [this, key, tag, id, timer] {
+            if (m_cancelTimers.value(key) == timer) m_cancelTimers.remove(key);
+            timer->deleteLater();
+            const bool pending = std::any_of(m_vpnPendingChallenges.cbegin(), m_vpnPendingChallenges.cend(),
+                                             [&](const VpnAuthChallenge &c) { return c.endpointTag == tag && c.id == id; });
+            if (!pending) return;
+            MW_show_log(QStringLiteral("[VPN] %1: sign-in prompt cancelled at its deadline").arg(Stats::VpnEndpointDisplayName(tag)));
+            cancel(tag, id);
+        });
+        m_cancelTimers.insert(key, timer);
+        timer->start();
+    }
+
+    bool VpnAuthController::authFailed() const {
+        return m_authFailed;
+    }
+
     void VpnAuthController::stopPoll() {
         if (m_vpnChallengeTimer != nullptr) m_vpnChallengeTimer->stop();
         resetTracking();
@@ -155,6 +189,13 @@ namespace Engine {
         m_vpnOtpRejects.clear();
         m_vpnChallengeAnswering.clear();
         m_vpnPendingChallenges.clear();
+        for (const auto &timer : std::as_const(m_cancelTimers)) {
+            if (timer.isNull()) continue;
+            timer->stop();
+            timer->deleteLater();
+        }
+        m_cancelTimers.clear();
+        m_authFailed = false;
         emit endpointStatusChanged({}, {}, false);
     }
 
@@ -237,6 +278,7 @@ namespace Engine {
         QStringList detailParts;
         QHash<QString, QString> seenStates;
         bool problem = false;
+        m_authFailed = std::any_of(states.cbegin(), states.cend(), [](const VpnEndpointState &state) { return state.authFailed; });
 
         for (const auto &state : states) {
             const auto name = Stats::VpnEndpointDisplayName(state.tag);

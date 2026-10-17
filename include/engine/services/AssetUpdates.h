@@ -84,7 +84,13 @@ namespace Engine::AssetUpdates {
     // Any thread; classifies a core error the way handleXrayGeoAssetError did.
     GeoError ClassifyGeoError(const QString &coreError);
 
-    // Any thread; returns whether coreError is a geo-asset one. Without prompt it only logs; with it, the policy is asked
-    // on the main thread whether to fetch the missing files. policy outlives the prompt.
-    bool HandleXrayGeoError(EnginePolicy *policy, const QString &coreError, const QString &contextName, bool prompt);
+    // Main thread, once from EngineHost::create().
+    void SetUnattendedFetch(bool enabled);
+
+    // Any thread; returns whether coreError is a geo-asset one. With prompt the policy is asked on the main thread whether to
+    // fetch the missing files. Without it, the error is only logged, unless unattended fetching is on and the files are missing
+    // (not a missing category): then they are downloaded on the main thread and onInstalled runs there after a clean result.
+    // policy outlives the prompt.
+    bool HandleXrayGeoError(EnginePolicy *policy, const QString &coreError, const QString &contextName, bool prompt,
+                            std::function<void()> onInstalled = {});
 } // namespace Engine::AssetUpdates

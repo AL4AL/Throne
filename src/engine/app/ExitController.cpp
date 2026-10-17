@@ -42,18 +42,19 @@ namespace Engine {
             return;
         }
         Configs::dataManager->settingsRepo->prepare_exit = true;
+        emit shutdownStarted();
         LOG_INFO("prepare_exit started, tearing down proxy/tun/core");
         // Before the waits below: their nested event loops would dispatch API requests mid-teardown.
         RemoteApi::Server::instance()->shutdown();
-        // Unconditional: an uncheck may still have its clear queued.
-        m_connection->applySystemProxy(false, true);
+        // Whatever the live mode says: an uncheck may still have its clear queued.
+        if (m_shutdownOptions.clearSystemProxy) m_connection->applySystemProxy(false, true);
         emit sessionPersisting();
         persistSessionState();
         Scanner::ScanManager::instance()->StopAll(true);
         Configs::dataManager->settingsRepo->noSave = true; // don't change Configs::dataManager->settingsRepo after this line
-        m_connection->stop({false, true, false, interactive});
+        m_connection->stop({false, true, false, interactive, m_shutdownOptions.stopRpcTimeoutMs, !m_shutdownOptions.stopTests});
 
-        m_coreSupervisor->shutdown();
+        m_coreSupervisor->shutdown(m_shutdownOptions.coreKillWaitMs);
         emit coreShutDown();
         // Only once the core is gone: until then the guard keeps blocking whatever would leak around the dying tunnel.
         Sys::KillSwitch::instance()->shutdown();
@@ -70,8 +71,10 @@ namespace Engine {
 
         // Backstop only: this runs on a graceful exit, so it must never be the sole write.
         if (settings->remember_enable && settings->started_id >= 0) settings->remember_id = settings->started_id;
-        settings->remember_system_proxy = settings->spmode_system_proxy;
-        settings->remember_tun = settings->spmode_vpn;
+        if (m_shutdownOptions.persistModes) {
+            settings->remember_system_proxy = settings->spmode_system_proxy;
+            settings->remember_tun = settings->spmode_vpn;
+        }
 
         settings->Save();
         qDebug() << "End of data save";

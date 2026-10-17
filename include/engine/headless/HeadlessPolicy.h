@@ -47,8 +47,6 @@ namespace Engine {
 
         void testSessionBusy(const QString &text) override;
 
-        bool pickInsteadOfStart(int profileId) override;
-
         void exitProgram(ExitReason reason, bool unattended) override;
     };
 } // namespace Engine

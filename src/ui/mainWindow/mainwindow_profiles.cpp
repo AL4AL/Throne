@@ -51,9 +51,7 @@ void MainWindow::on_profilesTableView_doubleClicked(const QModelIndex &index) {
     if (!index.isValid() || !profilesTableModel) return;
     int id = index.data(ProfilesTableModel::ProfileIdRole).toInt();
     if (select_mode) {
-        emit profile_selected(id);
-        select_mode = false;
-        refresh_status();
+        finish_select_mode(id);
         return;
     }
     auto dialog = new DialogEditProfile("", id, this);

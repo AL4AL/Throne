@@ -32,6 +32,9 @@ namespace Engine {
         // Readable while another process holds the lock; empty when there is no owner record.
         static QJsonObject ReadOwner(const QString &configDir);
 
+        // "<mode> (PID n, since <local time>)".
+        static QString DescribeOwner(const QJsonObject &owner);
+
         static QString LockPath(const QString &configDir);
 
     private:

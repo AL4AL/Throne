@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <utility>
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -25,6 +26,10 @@ namespace Engine::AssetUpdates {
         std::atomic<unsigned> assetGeoInFlight{0};
         // A geo prompt is pending or open; main thread only.
         bool assetXrayGeoPromptBusy = false;
+        std::atomic<bool> assetGeoUnattendedFetch{false};
+        // An unattended download runs, and the callers waiting for its clean result; main thread only.
+        bool assetGeoUnattendedBusy = false;
+        QList<std::function<void()>> assetGeoUnattendedWaiters;
 
         unsigned assetGeoBit(GeoFile file) {
             return 1u << static_cast<unsigned>(file);
@@ -179,7 +184,45 @@ namespace Engine::AssetUpdates {
         return geo;
     }
 
-    bool HandleXrayGeoError(EnginePolicy *policy, const QString &coreError, const QString &contextName, bool prompt) {
+    void SetUnattendedFetch(bool enabled) {
+        assetGeoUnattendedFetch.store(enabled);
+    }
+
+    namespace {
+        void assetGeoFetchUnattended(EnginePolicy *policy, const std::function<void()> &onInstalled) {
+            ENGINE_CHECK_MAIN_THREAD();
+            if (assetGeoUnattendedBusy) {
+                if (onInstalled) assetGeoUnattendedWaiters << onInstalled;
+                return;
+            }
+            GeoRequest request;
+            request.files.clear();
+            for (const auto &status : GeoStatus()) {
+                if (!status.present) request.files << status.file;
+            }
+            request.onlyMissing = true;
+            const bool started = UpdateGeoAssets(request, [policy](const QList<GeoFileResult> &results) {
+                QString dlErr;
+                for (const auto &result : results) {
+                    if (!result.error.isEmpty()) dlErr += result.fileName + ": " + result.error + "\n";
+                }
+                assetGeoUnattendedBusy = false;
+                const auto waiters = std::exchange(assetGeoUnattendedWaiters, {});
+                policy->geoAssetDownloadFinished(dlErr);
+                if (!dlErr.isEmpty()) return;
+                for (const auto &waiter : waiters) waiter();
+            });
+            if (!started) {
+                MW_show_log(QStringLiteral("[Geo assets] The missing files are already being downloaded by another request; nothing is retried."));
+                return;
+            }
+            assetGeoUnattendedBusy = true;
+            if (onInstalled) assetGeoUnattendedWaiters << onInstalled;
+        }
+    } // namespace
+
+    bool HandleXrayGeoError(EnginePolicy *policy, const QString &coreError, const QString &contextName, bool prompt,
+                            std::function<void()> onInstalled) {
         const auto classified = ClassifyGeoError(coreError);
         if (!classified.isGeo) return false;
         if (!prompt) {
@@ -191,6 +234,17 @@ namespace Engine::AssetUpdates {
                 QStringList missing;
                 if (classified.refGeoip) missing << QStringLiteral("geoip.dat");
                 if (classified.refGeosite) missing << QStringLiteral("geosite.dat");
+                if (assetGeoUnattendedFetch.load()) {
+                    MW_show_log(QStringLiteral("[Geo assets] The Xray config \"%1\" needs geo data files that are not installed: %2. Downloading them.")
+                                    .arg(contextName, missing.join(QStringLiteral(", "))));
+                    // Queued even from the main thread, so the caller reports its failure before a retry can run.
+                    if (auto *app = QCoreApplication::instance()) {
+                        QMetaObject::invokeMethod(app, [policy, onInstalled = std::move(onInstalled)] {
+                            assetGeoFetchUnattended(policy, onInstalled);
+                        }, Qt::QueuedConnection);
+                    }
+                    return true;
+                }
                 MW_show_log(MainWindowTr::tr("The Xray config \"%1\" needs geo data files that are not installed: %2. Download them under Basic Settings > Miscellaneous > Xray Geo Assets.")
                                 .arg(contextName, missing.join(QStringLiteral(", "))));
             }

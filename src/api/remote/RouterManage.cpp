@@ -538,7 +538,7 @@ namespace RemoteApi {
             respond(RouterManageImpl::busyConnection());
             return;
         }
-        const bool resume = Configs::dataManager->settingsRepo->remember_enable && engine_->runningSnapshot() != nullptr;
+        const bool resume = engine_->resumesOnBoot() && engine_->runningSnapshot() != nullptr;
         // Queued, so this reply leaves before the teardown starts.
         if (!engine_->requestExit(Engine::ExitReason::Restart)) {
             respond(RouterManageImpl::exiting());

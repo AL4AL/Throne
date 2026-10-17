@@ -27,6 +27,7 @@
 #include "include/global/LocalNetwork.hpp"
 #include "include/global/Logger.hpp"
 #include "include/scanner/ScanManager.h"
+#include "include/sys/HostPresence.hpp"
 #include "include/sys/KillSwitch.hpp"
 #include "include/sys/SystemProxy.hpp"
 #include "include/ui/mainWindow/MainWindowInternal.h"
@@ -423,9 +424,15 @@ void MainWindow::CheckUpdate() {
     }
 
     runOnUiThread([=,this] {
-        auto allow_updater = !Configs::dataManager->settingsRepo->flag_use_appdata;
+        const auto headless = Sys::HostPresence::OtherHeadless();
+        const bool headlessSameInstall = headless && Sys::HostPresence::SameInstall(*headless, QCoreApplication::applicationDirPath());
+        auto allow_updater = !Configs::dataManager->settingsRepo->flag_use_appdata && !headlessSameInstall;
         QMessageBox box(QMessageBox::Question, QObject::tr("Update") + note_pre_release,
                         QObject::tr("Update found: %1\nRelease note:\n%2").arg(assets_name, release_note));
+        if (headlessSameInstall) {
+            box.setInformativeText(tr("Update is unavailable while a background Throne (PID %1) runs from this installation; stop it first.")
+                                       .arg(headless->pid));
+        }
         QAbstractButton *btn1 = nullptr;
         if (allow_updater) {
             btn1 = box.addButton(QObject::tr("Update"), QMessageBox::AcceptRole);

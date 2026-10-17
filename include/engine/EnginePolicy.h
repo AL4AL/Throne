@@ -91,10 +91,6 @@ namespace Engine {
         // Interactive test requests only.
         virtual void testSessionBusy(const QString &text) = 0;
 
-        // Interactive starts of an existing profile, before its group and the core are checked: true when the GUI's select mode
-        // took the profile as its pick; no startFinished follows.
-        virtual bool pickInsteadOfStart(int profileId) = 0;
-
         // Ends the program the way the front end does (relaunch, updater, elevation); the engine passes only None and Restart.
         // unattended: no dialog during the teardown.
         virtual void exitProgram(ExitReason reason, bool unattended) = 0;

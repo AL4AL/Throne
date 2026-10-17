@@ -21,8 +21,19 @@ namespace Logging {
 
     void InstallQtMessageHandler();
 
-    // Mirrors file-bound lines at or above minLevel, and every user-log line, to stderr; works before Init(). Fatal always goes there.
+    // Mirrors lines at or above minLevel to stderr (user-log lines count as Info); works before Init(). Fatal always goes there.
+    // The sink takes lines by its own level, independent of the file level.
     void EnableStdSink(Level minLevel);
+
+    enum class StdFormat {
+        // journald "<N>" priority prefixes only when JOURNAL_STREAM matches stderr.
+        Auto,
+        Journal,
+        Plain,
+    };
+
+    // Any thread.
+    void SetStdFormat(StdFormat format);
 
     // Messages logged before this are buffered in memory and replayed.
     void Init(const QString &baseDir);

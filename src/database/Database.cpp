@@ -5,6 +5,8 @@
 #include <3rdparty/SQLiteCpp/include/Backup.h>
 #include <3rdparty/SQLiteCpp/include/sqlite3.h>
 #include <QDateTime>
+#include <QFile>
+#include <QFileInfo>
 #include <QObject>
 #include <algorithm>
 #include <chrono>
@@ -13,6 +15,11 @@
 #include <set>
 #include <thread>
 #include <unordered_map>
+
+#ifdef Q_OS_UNIX
+#include <cerrno>
+#include <unistd.h>
+#endif
 
 namespace Configs {
     namespace {
@@ -66,6 +73,25 @@ namespace Configs {
         if (code < 0) return false;
         const int primary = code & 0xff;
         return primary == SQLITE_READONLY || primary == SQLITE_CORRUPT || primary == SQLITE_NOTADB;
+    }
+
+    // SQLite reports a file this user may neither read nor write as CANTOPEN; other causes (EMFILE, a late mount) can pass.
+    bool DbFilesDenied(const QString& dbFile) {
+        if (!QFileInfo::exists(dbFile)) return false;
+        for (const QString& path : {dbFile, dbFile + QStringLiteral("-wal"), dbFile + QStringLiteral("-shm")}) {
+            if (!QFileInfo::exists(path)) continue;
+#ifdef Q_OS_UNIX
+            if (::access(QFile::encodeName(path).constData(), R_OK | W_OK) != 0 && (errno == EACCES || errno == EPERM)) return true;
+#else
+#if defined(Q_OS_WIN) && QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+            // Without it Qt reports only the read-only attribute, never the ACL.
+            const QNtfsPermissionCheckGuard ntfsCheck;
+#endif
+            const QFileInfo info(path);
+            if (!info.isReadable() || !info.isWritable()) return true;
+#endif
+        }
+        return false;
     }
 
     std::string DbRebuildMarkerPath(const std::string& dbPath) {

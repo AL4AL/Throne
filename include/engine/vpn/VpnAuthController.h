@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QList>
 #include <QObject>
+#include <QPointer>
 #include <QSet>
 #include <QString>
 
@@ -48,6 +49,13 @@ namespace Engine {
         QList<VpnAuthChallenge> pendingChallenges() const;
 
         QString exitStateText() const;
+
+        // Main thread. Cancels the challenge at the earlier of its own deadline (epoch seconds) and now + capSec, unless it is
+        // no longer pending or the run ended.
+        void cancelAtDeadline(const VpnAuthChallenge &challenge, int capSec);
+
+        // An endpoint reported an authentication failure on the last poll.
+        bool authFailed() const;
 
     signals:
         void endpointStatusChanged(const QString &summary, const QString &detail, bool problem);
@@ -100,5 +108,8 @@ namespace Engine {
         // Survives the restart the recovery itself triggers, so a rejected retry cannot loop.
         QHash<int, int> m_vpnAuthPrompted;
         int m_vpnAuthRestartID = -1;
+        // Keyed by endpoint tag + U+001F + challenge id; cleared in resetTracking().
+        QHash<QString, QPointer<QTimer>> m_cancelTimers;
+        bool m_authFailed = false;
     };
 } // namespace Engine

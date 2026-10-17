@@ -33,6 +33,11 @@ int MainWindow::get_profile_to_start() {
 
 void MainWindow::profile_start(int _id) {
     if (_id < 0) _id = get_profile_to_start();
+    if (select_mode && !Configs::dataManager->settingsRepo->prepare_exit && _id >= 0 &&
+        Configs::dataManager->profilesRepo->GetProfile(_id) != nullptr) {
+        finish_select_mode(_id);
+        return;
+    }
     connection()->start(StartRequest{_id});
 }
 

@@ -1,6 +1,7 @@
 #include "include/engine/connection/ConnectionManager.h"
 
 #include "include/api/RPC.h"
+#include "include/api/remote/Server.hpp"
 #include "include/configs/common/xrayStreamSetting.h"
 #include "include/configs/generate.h"
 #include "include/database/DatabaseManager.h"
@@ -18,21 +19,53 @@
 #include "include/engine/vpn/VpnEndpoints.h"
 #include "include/global/CountryHelper.hpp"
 #include "include/global/HTTPRequestHelper.hpp"
+#include "include/global/Logger.hpp"
 #include "include/global/RunningProfiles.hpp"
 #include "include/global/Utils.hpp"
 #include "include/sys/KillSwitch.hpp"
 
+#include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMutexLocker>
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <utility>
 
+namespace {
+#ifdef Q_OS_LINUX
+    constexpr bool kConnectionManagerLinux = true;
+#else
+    constexpr bool kConnectionManagerLinux = false;
+#endif
+
+    // Main thread, headless Linux, as a start brings the Tun up: once per boot each, the Tun settings that cut API clients off.
+    void connectionManagerWarnTunApiReach() {
+        static bool warnedRedirect = false;
+        static bool warnedIpv6 = false;
+        const auto api = RemoteApi::Server::instance()->lastResult();
+        if (api.state != RemoteApi::ApplyResult::State::Listening || api.address.isLoopback()) return;
+        const auto &settings = Configs::dataManager->settingsRepo;
+        if (!settings->vpn_auto_redirect && !std::exchange(warnedRedirect, true)) {
+            LOG_WARN(QStringLiteral("[Tun] replies to API clients outside the bypassed address ranges go into the tunnel; remote API "
+                                    "clients may lose the connection. From this host: thronectl tun off (after eval \"$(Throne "
+                                    "--headless --print-connection)\"), or restart with --no-resume"));
+        }
+        const auto protocol = api.address.protocol();
+        const bool acceptsIpv6 = protocol == QAbstractSocket::IPv6Protocol || protocol == QAbstractSocket::AnyIPProtocol;
+        if (settings->vpn_strict_route && !settings->vpn_ipv6 && acceptsIpv6 && !std::exchange(warnedIpv6, true)) {
+            LOG_WARN(QStringLiteral("[Tun] strict route without Tun IPv6 drops IPv6 API clients while Tun runs; set tun_ipv6 or listen "
+                                    "on IPv4"));
+        }
+    }
+} // namespace
+
 namespace Engine {
-    ConnectionManager::ConnectionManager(EnginePolicy *policy, CoreSupervisor *coreSupervisor, StatsService *stats, QObject *parent)
-        : QObject(parent), m_policy(policy), m_coreSupervisor(coreSupervisor), m_stats(stats) {
+    ConnectionManager::ConnectionManager(EnginePolicy *policy, CoreSupervisor *coreSupervisor, StatsService *stats,
+                                         const RuntimeOptions &options, QObject *parent)
+        : QObject(parent), m_policy(policy), m_coreSupervisor(coreSupervisor), m_stats(stats), m_options(options) {
         connect(m_coreSupervisor, &CoreSupervisor::coreStarted, this, &ConnectionManager::onCoreStarted);
         connect(m_coreSupervisor, &CoreSupervisor::coreGaveUp, this, &ConnectionManager::onCoreGaveUp);
         m_lastProfileId = Configs::dataManager->settingsRepo->remember_id;
@@ -46,6 +79,7 @@ namespace Engine {
 
     void ConnectionManager::start(const StartRequest &request) {
         ENGINE_CHECK_MAIN_THREAD();
+        ++m_geoRetryToken;
         if (Configs::dataManager->settingsRepo->prepare_exit) {
             emit startFinished(request.serial, request.profileId, StartOutcome::Exiting, {});
             return;
@@ -62,7 +96,7 @@ namespace Engine {
 
         m_lastProfileId = ent->id;
 
-        if (request.interactive && policy()->pickInsteadOfStart(ent->id)) return;
+        emit startDispatching(request.serial, ent->id);
 
         const auto group = Configs::dataManager->groupsRepo->GetGroup(ent->gid);
         if (group == nullptr || group->archive) {
@@ -89,7 +123,13 @@ namespace Engine {
             return;
         }
         if (!killSwitch->allowsStart()) {
-            MW_show_log(MainWindowTr::tr("[Kill switch] Not starting %1: the kill switch is not active.").arg(ent->outbound->DisplayTypeAndName()));
+            if (killSwitch->failedForIdentity()) {
+                MW_show_log(QStringLiteral("[Kill switch] Not starting %1: profiles are refused while the core cannot adopt the "
+                                           "kill-switch group (the kill switch keeps blocking).")
+                                .arg(ent->outbound->DisplayTypeAndName()));
+            } else {
+                MW_show_log(MainWindowTr::tr("[Kill switch] Not starting %1: the kill switch is not active.").arg(ent->outbound->DisplayTypeAndName()));
+            }
             emit startFinished(request.serial, ent->id, StartOutcome::KillSwitchInactive, killSwitch->failureText());
             if (request.interactive) policy()->killSwitchProblem();
             return;
@@ -161,7 +201,12 @@ namespace Engine {
                 return false;
             }
             if (!error.isEmpty()) {
-                if (Engine::AssetUpdates::HandleXrayGeoError(policy(), error, ent->outbound->DisplayTypeAndName(), resolved.interactive)) {
+                std::function<void()> onGeoInstalled;
+                if (m_options.geoAutoDownload) {
+                    onGeoInstalled = [this, id = ent->id, token = m_geoRetryToken.load()] { retryAfterGeoFetch(id, token); };
+                }
+                if (Engine::AssetUpdates::HandleXrayGeoError(policy(), error, ent->outbound->DisplayTypeAndName(), resolved.interactive,
+                                                             onGeoInstalled)) {
                     finish(StartOutcome::GeoAssetsMissing, error);
                     return false;
                 }
@@ -193,12 +238,13 @@ namespace Engine {
             Stats::SetVpnEndpointProfiles(result->vpnEndpointProfiles);
             m_stats->setOutboundNames(result->outboundNames);
             Configs::SetRunningProfiles(result->involvedProfiles);
-            setRunning(ent);
+            setRunning(ent, !result->tunIPv4CIDR.isEmpty());
             if (Configs::dataManager->settingsRepo->spmode_system_proxy) applySystemProxy(true);
 
             const bool exitIsEndpoint = Stats::VpnExitEndpoint(ent) != nullptr;
 
             runOnUiThread([=, this] {
+                m_geoRetriedProfile = -1;
                 clearRestartNeeded();
                 m_vpnAuth->noteRunStarted();
                 emit statusChanged();
@@ -208,7 +254,7 @@ namespace Engine {
                 // "Only route advertised network" rejects this probe.
                 if (exitIsEndpoint) return;
 
-                lookupExitCountry(ent);
+                if (m_options.exitCountryLookup) lookupExitCountry(ent);
             });
 
             return true;
@@ -219,8 +265,8 @@ namespace Engine {
             return;
         }
         if (!mu_stopping.tryLock()) {
-            failStart(resolved, StartOutcome::Busy, QStringLiteral("Throne"), MainWindowTr::tr("Another profile is stopping..."));
             mu_starting.unlock();
+            failStart(resolved, StartOutcome::Busy, QStringLiteral("Throne"), MainWindowTr::tr("Another profile is stopping..."));
             return;
         }
         mu_stopping.unlock();
@@ -245,6 +291,8 @@ namespace Engine {
             mu_starting.unlock();
             return;
         }
+
+        if (kConnectionManagerLinux && m_options.headless && Configs::dataManager->settingsRepo->spmode_vpn) connectionManagerWarnTunApiReach();
 
         const Engine::SlowOperation slowStart = resolved.interactive
             ? policy()->slowOperation(Engine::SlowOperationKind::Start, 10000)
@@ -292,7 +340,10 @@ namespace Engine {
         const bool block = options.block;
         const bool manual = options.manual;
         const bool interactive = options.interactive;
+        const int rpcTimeoutMs = options.rpcTimeoutMs;
+        const bool skipTests = options.skipTests;
 
+        if (manual) ++m_geoRetryToken;
         const auto current = runningSnapshot();
         if (current == nullptr) {
             // A crashed profile waits for the restarted core with nothing running; a user stop cancels that.
@@ -302,14 +353,14 @@ namespace Engine {
         const auto id = current->id;
 
         auto profile_stop_stage2 = [=,this](const Engine::SlowOperation &slowStop) {
-            if (m_tests->isTestingCurrent()) {
+            if (!skipTests && m_tests->isTestingCurrent()) {
                 bool ok;
                 API::defaultClient->StopTests(&ok);
                 if (!ok) MW_show_log("Failed to stop profile tests!");
             }
             if (!crash) {
                 bool rpcOK;
-                const QString error = API::defaultClient->Stop(&rpcOK);
+                const QString error = API::defaultClient->Stop(&rpcOK, rpcTimeoutMs);
                 runOnUiThread([slowStop] { slowStop.dismiss(); });
                 if (rpcOK && !error.isEmpty()) {
                     if (interactive) {
@@ -414,25 +465,61 @@ namespace Engine {
         m_coreStartRequest = request;
     }
 
+    void ConnectionManager::setBootStart(const StartRequest &request) {
+        ENGINE_CHECK_MAIN_THREAD();
+        m_bootSerial = request.serial;
+        deferStartToCore(request);
+    }
+
     void ConnectionManager::onCoreStarted(int profileId) {
         auto &settings = Configs::dataManager->settingsRepo;
         m_guardCoreRestart.invalidate();
         // The core may just have been given root, which the guard needs too.
         if (Sys::KillSwitch::instance()->failedForPrivileges()) Sys::KillSwitch::instance()->apply();
-        if (settings->remember_enable && settings->remember_system_proxy) {
-            setSystemProxy(true, ModeChange{.save = false});
-        }
-        if ((settings->remember_enable && settings->remember_tun) || settings->flag_restart_tun_on) {
-            setTun(true, ModeChange{.save = settings->flag_restart_tun_on});
-            settings->flag_restart_tun_on = false;
+        QString tunHoldWhy;
+        if (m_options.headless) {
+            const bool wantTun = settings->remember_tun || settings->flag_restart_tun_on;
+            if (wantTun) {
+                setTun(true, ModeChange{.save = false, .interactive = false, .restart = false});
+                settings->flag_restart_tun_on = false;
+            }
+            // setTun's return value is not success, so the hold is judged by the resulting state.
+            m_tunRestoreHeld = m_options.tunRequired && wantTun && !settings->spmode_vpn;
+            if (m_tunRestoreHeld) {
+                tunHoldWhy = tunRestoreHoldReason();
+                MW_show_log(QStringLiteral("[Tun] The remembered Tun mode could not be restored: %1 (degraded: tun_unavailable).")
+                                .arg(tunHoldWhy));
+            }
+        } else {
+            if (settings->remember_enable && settings->remember_system_proxy) {
+                setSystemProxy(true, ModeChange{.save = false});
+            }
+            if ((settings->remember_enable && settings->remember_tun) || settings->flag_restart_tun_on) {
+                setTun(true, ModeChange{.save = settings->flag_restart_tun_on});
+                settings->flag_restart_tun_on = false;
+            }
         }
         {
             const int id = profileId;
             const auto request = std::exchange(m_coreStartRequest, StartRequest{});
+            const quint64 bootSerial = std::exchange(m_bootSerial, 0);
             if (request.profileId >= 0 && request.profileId != id) {
                 emit startFinished(request.serial, request.profileId, StartOutcome::Superseded, {});
             }
-            if (id >= 0) start(request.profileId == id ? request : StartRequest{id});
+            if (id >= 0) {
+                const StartRequest next = request.profileId == id ? request : StartRequest{id};
+                // Any other start (crash resume, deferred API start) runs proxy-only, as it would against a live core.
+                if (m_tunRestoreHeld && next.serial != 0 && next.serial == bootSerial) {
+                    const auto ent = Configs::dataManager->profilesRepo->GetProfile(id);
+                    MW_show_log(QStringLiteral("[Tun] Not starting %1 without Tun; turn Tun off to run it proxy-only.")
+                                    .arg(ent != nullptr && ent->outbound ? ent->outbound->DisplayTypeAndName() : QString::number(id)));
+                    emit startFinished(next.serial, id, StartOutcome::TunFailed,
+                                       QStringLiteral("Tun could not be restored (%1); the profile was not started without it.")
+                                           .arg(tunHoldWhy));
+                } else {
+                    start(next);
+                }
+            }
         }
         emit statusChanged();
     }
@@ -442,6 +529,18 @@ namespace Engine {
         m_guardCoreRestart.invalidate();
         const auto request = std::exchange(m_coreStartRequest, StartRequest{});
         if (request.profileId >= 0) emit startFinished(request.serial, request.profileId, StartOutcome::CoreUnavailable, reason);
+    }
+
+    void ConnectionManager::retryAfterGeoFetch(int profileId, quint64 token) {
+        ENGINE_CHECK_MAIN_THREAD();
+        if (token != m_geoRetryToken.load()) return;
+        if (std::exchange(m_geoRetriedProfile, profileId) == profileId) return;
+        if (Configs::dataManager->settingsRepo->prepare_exit || connectionState() != ConnectionState::Idle ||
+            m_lastProfileId != profileId) {
+            return;
+        }
+        MW_show_log(QStringLiteral("Geo assets installed; starting profile %1 again.").arg(profileId));
+        start(StartRequest{profileId, false});
     }
 
     void ConnectionManager::lookupExitCountry(const std::shared_ptr<Configs::Profile> &ent) {
@@ -486,9 +585,15 @@ namespace Engine {
         return m_running;
     }
 
-    void ConnectionManager::setRunning(std::shared_ptr<Configs::Profile> profile) {
+    void ConnectionManager::setRunning(std::shared_ptr<Configs::Profile> profile, bool tun) {
         QMutexLocker locker(&m_runningMutex);
         m_running.swap(profile);
+        m_runningTun = m_running != nullptr && tun;
+    }
+
+    bool ConnectionManager::runningTun() const {
+        QMutexLocker locker(&m_runningMutex);
+        return m_runningTun;
     }
 
     quint64 ConnectionManager::nextStartSerial() {
@@ -499,6 +604,8 @@ namespace Engine {
         ENGINE_CHECK_MAIN_THREAD();
         if (const auto connState = connectionState(); connState != m_lastConnectionState) {
             m_lastConnectionState = connState;
+            // Whether a profile runs decides the dns-in port probe, and a Tun of ours may just have gone.
+            m_tunBlockedAtMs = 0;
             emit connectionStateChanged(connState);
         }
     }

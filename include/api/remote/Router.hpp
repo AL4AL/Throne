@@ -40,6 +40,9 @@ namespace RemoteApi {
 
         void dispatch(const Request &request, const Responder &respond);
 
+        // Main thread; also the headless instance socket's HEALTH reply.
+        QJsonObject statusJson() const;
+
     private:
         // Answered exactly once: by the change it waits for, or with onDeadline() once its timer fires.
         struct Waiter {
@@ -136,7 +139,6 @@ namespace RemoteApi {
         QList<std::shared_ptr<Configs::Profile>> groupProfiles(int gid, const QRegularExpression &nameFilter) const;
         bool connectionBusy() const;
 
-        QJsonObject statusJson() const;
         QJsonObject profileJson(const std::shared_ptr<Configs::Profile> &profile) const;
         static QJsonObject groupJson(const Configs::Group &group);
         static QJsonObject routeJson(const Configs::RouteProfile &route);

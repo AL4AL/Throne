@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QStringList>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -15,6 +16,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -75,9 +77,18 @@ namespace Engine {
         }
 #else
         const QByteArray nativePath = QFile::encodeName(path);
-        const int f = ::open(nativePath.constData(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+        // Whoever owns the data dir could aim the truncate below at another file through a link; O_NONBLOCK keeps a FIFO from hanging.
+        const int f = ::open(nativePath.constData(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, 0600);
         if (f < 0) {
-            error = QString("could not open %1: %2").arg(path, QString::fromLocal8Bit(std::strerror(errno)));
+            const int code = errno;
+            error = QString("could not open %1: %2")
+                        .arg(path, code == ELOOP ? QStringLiteral("it is a symbolic link") : QString::fromLocal8Bit(std::strerror(code)));
+            return Result::Failed;
+        }
+        struct stat st{};
+        if (::fstat(f, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1) {
+            ::close(f);
+            error = QString("could not open %1: it is not a regular file with a single link").arg(path);
             return Result::Failed;
         }
         if (::flock(f, LOCK_EX | LOCK_NB) != 0) {
@@ -139,5 +150,17 @@ namespace Engine {
         if (!file.open(QIODevice::ReadOnly)) return {};
         return ParseOwnerRecord(file.read(MAX_OWNER_RECORD));
 #endif
+    }
+
+    QString DataDirLock::DescribeOwner(const QJsonObject &owner) {
+        const QString mode = owner.value("mode").toString();
+        const qint64 pid = owner.value("pid").toInteger();
+        const qint64 started = owner.value("started").toInteger();
+        QStringList details;
+        if (pid > 0) details << QString("PID %1").arg(pid);
+        if (started > 0) details << "since " + QDateTime::fromSecsSinceEpoch(started).toString("yyyy-MM-dd HH:mm:ss");
+        QString text = mode.isEmpty() ? QStringLiteral("another Throne") : mode;
+        if (!details.isEmpty()) text += " (" + details.join(", ") + ")";
+        return text;
     }
 } // namespace Engine

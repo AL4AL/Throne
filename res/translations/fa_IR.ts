@@ -2769,6 +2769,14 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <source>Geo asset files are already being downloaded.</source>
         <translation>فایل‌های داده‌های جغرافیایی در حال دانلود هستند.</translation>
     </message>
+    <message>
+        <source>Update is unavailable while a background Throne (PID %1) runs from this installation; stop it first.</source>
+        <translation>تا زمانی که یک Throne پس‌زمینه (PID %1) از همین نصب اجرا می‌شود، به‌روزرسانی در دسترس نیست؛ ابتدا آن را متوقف کنید.</translation>
+    </message>
+    <message>
+        <source>Kill switch is blocking traffic</source>
+        <translation>Kill switch در حال مسدود کردن ترافیک است</translation>
+    </message>
 </context>
 <context>
     <name>ProfilesTableModel</name>
@@ -3069,6 +3077,31 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     <message>
         <source>The core keeps exiting, so it is no longer restarted. Use Restart Core to try again.</source>
         <translation>هسته مدام متوقف می‌شود، بنابراین دیگر دوباره راه‌اندازی نمی‌شود. برای تلاش دوباره از «Restart Core» استفاده کنید.</translation>
+    </message>
+</context>
+<context>
+    <name>StartStopButton</name>
+    <message>
+        <source>Kill switch is blocking traffic</source>
+        <translation>Kill switch در حال مسدود کردن ترافیک است</translation>
+    </message>
+</context>
+<context>
+    <name>GuiStartup</name>
+    <message>
+        <source>Throne is running in the background</source>
+        <translation>Throne در پس‌زمینه در حال اجراست</translation>
+    </message>
+    <message>
+        <source>A background Throne (PID %1) is running on this computer (data directory: %2). Tun mode is unavailable here while it runs; stop it or use thronectl.</source>
+        <translation>یک Throne پس‌زمینه (PID %1) روی این رایانه در حال اجراست (پوشه داده: %2). تا زمانی که اجرا می‌شود، حالت Tun در اینجا در دسترس نیست؛ آن را متوقف کنید یا از thronectl استفاده کنید.</translation>
+    </message>
+</context>
+<context>
+    <name>Engine::ConnectionManager</name>
+    <message>
+        <source>A background Throne (PID %1) owns Tun on this computer; stop it or use thronectl.</source>
+        <translation>حالت Tun روی این رایانه در اختیار یک Throne پس‌زمینه (PID %1) است؛ آن را متوقف کنید یا از thronectl استفاده کنید.</translation>
     </message>
 </context>
 </TS>

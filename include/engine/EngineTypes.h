@@ -39,6 +39,10 @@ namespace Engine {
         bool block = false;
         bool manual = false;
         bool interactive = true;
+        // 0: the channel default (30 s).
+        int rpcTimeoutMs = 0;
+        // Skip StopTests in the stop.
+        bool skipTests = false;
     };
 
     struct ModeChange {

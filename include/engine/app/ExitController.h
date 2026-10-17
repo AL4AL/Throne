@@ -10,6 +10,27 @@ namespace Engine {
     class CoreSupervisor;
     class EnginePolicy;
 
+    // The defaults are the GUI's teardown.
+    struct ShutdownOptions {
+        // 0: the channel default.
+        int stopRpcTimeoutMs = 0;
+        bool stopTests = true;
+        bool clearSystemProxy = true;
+        int coreKillWaitMs = 30000;
+        // remember_system_proxy/remember_tun from the live modes.
+        bool persistModes = true;
+
+        static ShutdownOptions Headless() {
+            ShutdownOptions options;
+            options.stopRpcTimeoutMs = 10000;
+            options.stopTests = false;
+            options.clearSystemProxy = false;
+            options.coreKillWaitMs = 3000;
+            options.persistModes = false;
+            return options;
+        }
+    };
+
     // The shutdown both front ends share, and the queued unattended exit the Throne API asks for. Main thread only.
     class ExitController final : public QObject {
         Q_OBJECT
@@ -32,7 +53,12 @@ namespace Engine {
 
         void setExitInProgress(bool inProgress) { m_exitInProgress = inProgress; }
 
+        void setShutdownOptions(const ShutdownOptions &options) { m_shutdownOptions = options; }
+
     signals:
+        // Right after prepare_exit is set.
+        void shutdownStarted();
+
         // Before persistSessionState() in shutdown(); the GUI releases its shortcuts and writes its geometry into the settings.
         void sessionPersisting();
 
@@ -46,5 +72,6 @@ namespace Engine {
         QMutex mu_exit;
         bool m_exitInProgress = false;
         bool m_exitQueued = false;
+        ShutdownOptions m_shutdownOptions;
     };
 } // namespace Engine

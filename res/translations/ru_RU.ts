@@ -7804,6 +7804,14 @@ Name: %1</source>
         <source>Geo asset files are already being downloaded.</source>
         <translation>Файлы геоданных уже загружаются.</translation>
     </message>
+    <message>
+        <source>Update is unavailable while a background Throne (PID %1) runs from this installation; stop it first.</source>
+        <translation>Обновление недоступно, пока из этой установки работает фоновый Throne (PID %1); сначала остановите его.</translation>
+    </message>
+    <message>
+        <source>Kill switch is blocking traffic</source>
+        <translation>Kill switch блокирует трафик</translation>
+    </message>
 </context>
 <context>
     <name>OtpItem</name>
@@ -9546,6 +9554,10 @@ Remove that endpoint from this routing profile as well?</source>
         <source>Stopping…</source>
         <translation>Отключение…</translation>
     </message>
+    <message>
+        <source>Kill switch is blocking traffic</source>
+        <translation>Kill switch блокирует трафик</translation>
+    </message>
 </context>
 <context>
     <name>SubscriptionInfoCard</name>
@@ -9723,6 +9735,24 @@ Remove that endpoint from this routing profile as well?</source>
     <message>
         <source>The core keeps exiting, so it is no longer restarted. Use Restart Core to try again.</source>
         <translation>Ядро постоянно завершает работу, поэтому больше не перезапускается. Попробуйте снова через «Перезапуск ядра».</translation>
+    </message>
+</context>
+<context>
+    <name>GuiStartup</name>
+    <message>
+        <source>Throne is running in the background</source>
+        <translation>Throne работает в фоновом режиме</translation>
+    </message>
+    <message>
+        <source>A background Throne (PID %1) is running on this computer (data directory: %2). Tun mode is unavailable here while it runs; stop it or use thronectl.</source>
+        <translation>На этом компьютере работает фоновый Throne (PID %1, каталог данных: %2). Пока он работает, режим Tun здесь недоступен; остановите его или используйте thronectl.</translation>
+    </message>
+</context>
+<context>
+    <name>Engine::ConnectionManager</name>
+    <message>
+        <source>A background Throne (PID %1) owns Tun on this computer; stop it or use thronectl.</source>
+        <translation>Tun на этом компьютере занят фоновым Throne (PID %1); остановите его или используйте thronectl.</translation>
     </message>
 </context>
 </TS>

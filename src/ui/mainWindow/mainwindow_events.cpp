@@ -228,6 +228,21 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
 
 void MainWindow::start_select_mode(QObject *context, const std::function<void(int)> &callback) {
     select_mode = true;
+    if (shortcut_select_cancel == nullptr) {
+        shortcut_select_cancel = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+        shortcut_select_cancel->setContext(Qt::WindowShortcut);
+        connect(shortcut_select_cancel, &QShortcut::activated, this, [this] {
+            if (select_mode) finish_select_mode(-1);
+        });
+    }
+    shortcut_select_cancel->setEnabled(true);
     connectOnce(this, &MainWindow::profile_selected, context, callback);
+    refresh_status();
+}
+
+void MainWindow::finish_select_mode(int profileId) {
+    if (shortcut_select_cancel != nullptr) shortcut_select_cancel->setEnabled(false);
+    emit profile_selected(profileId);
+    select_mode = false;
     refresh_status();
 }

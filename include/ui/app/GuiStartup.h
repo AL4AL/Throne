@@ -30,4 +30,7 @@ namespace GuiStartup {
     void LoadTranslator();
 
     void InstallSessionEndHooks(QApplication &app, void (*onSessionEnd)(int));
+
+    // After the engine init: a headless Throne running on this host (another data dir) gets a log line and a passive notice.
+    void WarnAboutHeadless();
 } // namespace GuiStartup

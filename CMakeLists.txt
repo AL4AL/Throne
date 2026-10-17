@@ -149,6 +149,7 @@ set(PROJECT_SOURCES
         include/api/remote/Server.hpp
         src/api/remote/Server.cpp
         src/api/remote/Config.cpp
+        include/api/remote/Overlay.hpp
         include/api/remote/Router.hpp
         src/api/remote/Router.cpp
         src/api/remote/RouterTests.cpp
@@ -670,6 +671,17 @@ if (DASHBOARD_FILES)
             PROPERTY AUTORCC_OPTIONS "--compress-algo;zlib;--compress;9;--threshold;5")
 endif ()
 
+# Portable headless glue (sys layer, no <windows.h>), right before the engine block so it only regroups the trailing batches.
+set(HEADLESS_SYS_SOURCES
+        include/sys/ServiceManager.hpp
+        src/sys/ServiceManager.cpp
+        include/sys/HostPresence.hpp
+        src/sys/HostPresence.cpp
+        include/sys/HostTun.hpp
+        src/sys/HostTun.cpp
+)
+list(APPEND PROJECT_SOURCES ${HEADLESS_SYS_SOURCES})
+
 # Appended last so engine TUs form trailing MSVC unity batches: adding one never regroups the batches above.
 set(ENGINE_SOURCES
         include/engine/EngineTypes.h
@@ -727,11 +739,33 @@ set(ENGINE_SOURCES
         src/engine/app/ExitController.cpp
         include/engine/EngineHost.h
         src/engine/EngineHost.cpp
+        include/engine/RuntimeOptions.h
+        include/engine/app/ExitCodes.h
+        include/engine/headless/HeadlessCli.h
+        src/engine/headless/HeadlessCli.cpp
+        include/engine/headless/ResumeGuard.h
+        src/engine/headless/ResumeGuard.cpp
+        include/engine/headless/RuntimeStatus.h
+        src/engine/headless/RuntimeStatus.cpp
+        include/engine/headless/HeadlessApi.h
+        src/engine/headless/HeadlessApi.cpp
+        include/engine/headless/HeadlessInstance.h
+        src/engine/headless/HeadlessInstance.cpp
+        include/engine/headless/HeadlessRuntime.h
+        src/engine/headless/HeadlessRuntime.cpp
+        include/engine/headless/SupervisorLink.h
+        src/engine/headless/SupervisorLink.cpp
+        include/engine/headless/Preflight.h
+        src/engine/headless/Preflight.cpp
+        include/engine/headless/HeadlessMain.h
+        src/engine/headless/HeadlessMain.cpp
         # Last: its <windows.h> macros must not reach a later TU of the same MSVC unity batch.
         include/engine/supervisor/CoreSupervisor.h
         src/engine/supervisor/CoreSupervisor.cpp
 )
 list(APPEND PROJECT_SOURCES ${ENGINE_SOURCES})
+# Windows only (cmake/windows/windows.cmake); empty elsewhere.
+list(APPEND PROJECT_SOURCES ${PLATFORM_HEADLESS_SOURCES})
 
 # Qt exe
 qt_add_executable(Throne

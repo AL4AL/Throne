@@ -9,6 +9,10 @@
 #include <string_view>
 #include <utility>
 
+namespace API {
+    struct PrivilegeInfo;
+}
+
 namespace Configs {
     void initDB(const std::string& dbPath);
 
@@ -21,6 +25,15 @@ namespace Configs {
 
     // Caches an answer IsAdmin would have fetched, such as the core's privilege probe. Main thread.
     void SetKnownAdmin(bool admin);
+
+    // The core's last privilege report (the probe stores it next to SetKnownAdmin); empty while unknown. Main thread.
+    std::optional<API::PrivilegeInfo> KnownCapabilities();
+
+    void SetKnownCapabilities(const API::PrivilegeInfo &info);
+
+    // Main thread, before refusing Tun on a cached tun_device == false (the device may appear while the core runs): asks the
+    // connected core again within timeoutMs and updates both caches. No-op otherwise and on Windows.
+    void RefreshStaleTunDevice(int timeoutMs);
 
     bool isSetuidSet(const std::string& path);
 

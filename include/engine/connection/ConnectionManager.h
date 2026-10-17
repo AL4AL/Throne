@@ -10,6 +10,7 @@
 #include <QString>
 
 #include "include/engine/EngineTypes.h"
+#include "include/engine/RuntimeOptions.h"
 
 namespace Configs {
     class Profile;
@@ -29,7 +30,8 @@ namespace Engine {
         Q_OBJECT
 
     public:
-        ConnectionManager(EnginePolicy *policy, CoreSupervisor *coreSupervisor, StatsService *stats, QObject *parent = nullptr);
+        ConnectionManager(EnginePolicy *policy, CoreSupervisor *coreSupervisor, StatsService *stats, const RuntimeOptions &options,
+                          QObject *parent = nullptr);
 
         // Before the event loop runs; all three outlive every start and stop.
         void attach(TestRunner *tests, AutoSelectorController *autoSelector, VpnAuthController *vpnAuth);
@@ -37,7 +39,7 @@ namespace Engine {
         // Once, before the first KillSwitch::apply(), so the state changes apply() emits reach the handler.
         void attachKillSwitch();
 
-        // startFinished fires once per request unless policy()->pickInsteadOfStart() claimed it. profileId < 0: NotFound.
+        // startFinished fires once per request. profileId < 0: NotFound.
         void start(const StartRequest &request);
 
         // Any thread, a start worker included; runs on the caller. block: the caller spins a nested loop until the main-thread
@@ -47,6 +49,23 @@ namespace Engine {
         bool restartStartedProfile(bool interactive = true, quint64 restartSerial = 0);
 
         void applyPendingRestart();
+
+        // Before CoreSupervisor::start(): the first coreStarted for request.profileId runs exactly this request (as
+        // deferStartToCore does).
+        void setBootStart(const StartRequest &request);
+
+        // Windows: IsAdmin(). Elsewhere: KnownAdmin() when known; otherwise options.blockingPrivilegeCheck && IsAdmin().
+        bool tunPrivileged();
+
+        // A remembered Tun the boot could not restore; cleared by a Tun disable or a successful enable.
+        bool tunRestoreHeld() const { return m_tunRestoreHeld; }
+
+        // Main thread. Empty while Tun is requested here or the running config carries a tun inbound. Headless: Sys::HostTun::Conflict(vpn_tun_ipv4_cidr, idle ? core_dns_in_port
+        // : 0), cached for 5 s. GUI: a live headless instance from Sys::HostPresence::OtherHeadless() (translated text).
+        QString tunBlockedReason();
+
+        // Any thread. The running config carries a tun inbound.
+        bool runningTun() const;
 
         ConnectionState connectionState() const;
 
@@ -86,6 +105,10 @@ namespace Engine {
         // API; EngineHost relays them with Qt::DirectConnection. The types are unregistered.
         void startFinished(quint64 serial, int profileId, Engine::StartOutcome outcome, const QString &error);
 
+        // Main thread, inside start() once the profile resolved and before its config is built; every pass of one request
+        // (rank and kill-switch re-entries) emits it again with the same serial. Direct connections only.
+        void startDispatching(quint64 serial, int profileId);
+
         // After mu_stopping is released.
         void stopFinished(int profileId);
 
@@ -100,10 +123,8 @@ namespace Engine {
 
         void runMarker(qint64 monoMs, Engine::RunMarker kind, const QString &name);
 
-        // Every accepted note (a repeat included) and every clear that removed something.
+        // Only when the set of pending reasons changed.
         void restartReasonsChanged();
-
-        void systemProxyRefused();
 
     private:
         static constexpr qint64 kGuardRestartWindowMs = 15000;
@@ -118,7 +139,11 @@ namespace Engine {
 
         void deferStartToCore(const StartRequest &request);
 
-        void setRunning(std::shared_ptr<Configs::Profile> profile);
+        // tun: the running config carries a tun inbound (generated Tun or a custom config's).
+        void setRunning(std::shared_ptr<Configs::Profile> profile, bool tun = false);
+
+        // ConnectionModes.cpp. Why the boot Tun restore was held: the host conflict, the capability blocker, else privileges.
+        QString tunRestoreHoldReason();
 
         void syncState();
 
@@ -131,6 +156,10 @@ namespace Engine {
 
         void restartCoreForGuard(const StartRequest &request);
 
+        // A start that failed with GeoAssetsMissing restarts once per profile after the unattended download, unless a start or a
+        // manual stop moved token on since the failure.
+        void retryAfterGeoFetch(int profileId, quint64 token);
+
         EnginePolicy *m_policy;
         CoreSupervisor *m_coreSupervisor;
         StatsService *m_stats;
@@ -141,6 +170,7 @@ namespace Engine {
         // Written by the start/stop workers; read through runningSnapshot().
         mutable QMutex m_runningMutex;
         std::shared_ptr<Configs::Profile> m_running;
+        bool m_runningTun = false;
 
         // Main thread only.
         int m_lastProfileId = -1;
@@ -161,5 +191,17 @@ namespace Engine {
         QMutex mu_stopping;
         // Set while start() stops the running profile, so that stop is marked as part of the switch.
         std::atomic<bool> m_switchingProfile{false};
+
+        RuntimeOptions m_options;
+        bool m_tunRestoreHeld = false;
+        QString m_tunBlockedCache;
+        // The inputs m_tunBlockedCache was computed from (Tun CIDR and probed DNS port); a change recomputes it.
+        QString m_tunBlockedKey;
+        qint64 m_tunBlockedAtMs = 0;
+        // The boot request's serial until the first coreStarted; only that request is refused while the Tun is held.
+        quint64 m_bootSerial = 0;
+        int m_geoRetriedProfile = -1;
+        // Any thread: bumped by start() and every manual stop.
+        std::atomic<quint64> m_geoRetryToken{0};
     };
 } // namespace Engine

@@ -103,7 +103,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(host->connection(), &Engine::ConnectionManager::profileRowsChanged, this, [this](const QList<int> &ids) { refresh_proxy_list(ids); });
     connect(host->connection(), &Engine::ConnectionManager::runMarker, this, &MainWindow::addRunMarker);
     connect(host->connection(), &Engine::ConnectionManager::restartReasonsChanged, this, &MainWindow::showRestartReasons);
-    connect(host->connection(), &Engine::ConnectionManager::systemProxyRefused, this, [this] { ui->checkBox_SystemProxy->setChecked(false); });
     connect(host->vpnAuth(), &Engine::VpnAuthController::endpointStatusChanged, this, &MainWindow::showVpnEndpointStatus);
     connect(host->vpnAuth(), &Engine::VpnAuthController::exitStateChanged, this, [this] { refresh_status(); });
     connect(host, &Engine::EngineHost::statusChanged, this, [this] { refresh_status(); });

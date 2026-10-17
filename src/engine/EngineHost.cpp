@@ -5,6 +5,7 @@
 #include <atomic>
 #include <memory>
 
+#include "include/api/remote/Overlay.hpp"
 #include "include/api/remote/Router.hpp"
 #include "include/api/remote/Server.hpp"
 #include "include/configs/generate.h"
@@ -19,6 +20,7 @@
 #include "include/engine/autoselector/AutoSelectorController.h"
 #include "include/engine/connection/ConnectionManager.h"
 #include "include/engine/headless/HeadlessPolicy.h"
+#include "include/engine/services/AssetUpdates.h"
 #include "include/engine/services/Dashboard.h"
 #include "include/engine/services/ProfileService.h"
 #include "include/engine/services/StatsService.h"
@@ -124,10 +126,6 @@ namespace Engine {
             target(__func__)->testSessionBusy(text);
         }
 
-        bool pickInsteadOfStart(int profileId) override {
-            return target(__func__)->pickInsteadOfStart(profileId);
-        }
-
         void exitProgram(ExitReason reason, bool unattended) override {
             target(__func__)->exitProgram(reason, unattended);
         }
@@ -178,7 +176,7 @@ namespace Engine {
         std::atomic<TestObserver *> m_target{nullptr};
     };
 
-    EngineHost::EngineHost() = default;
+    EngineHost::EngineHost(const RuntimeOptions &options) : m_options(options) {}
 
     EngineHost::~EngineHost() {
         engineHostInstance = nullptr;
@@ -195,7 +193,7 @@ namespace Engine {
         delete m_stats;
     }
 
-    EngineHost *EngineHost::create() {
+    EngineHost *EngineHost::create(const RuntimeOptions &options) {
         ENGINE_CHECK_MAIN_THREAD();
         if (engineHostInstance != nullptr) {
             LOG_WARN("EngineHost::create() called again; keeping the existing host");
@@ -205,7 +203,8 @@ namespace Engine {
         Throne::PeriodicRunner::instance();
         Subscription::updater();
         EngineEvents::instance();
-        auto *created = new EngineHost;
+        AssetUpdates::SetUnattendedFetch(options.geoAutoDownload);
+        auto *created = new EngineHost(options);
         engineHostInstance = created;
         created->construct();
         return created;
@@ -216,7 +215,7 @@ namespace Engine {
         m_observer = std::make_unique<ObserverRelay>();
         m_stats = new StatsService(this);
         m_coreSupervisor = new CoreSupervisor(this);
-        m_connection = new ConnectionManager(policy(), m_coreSupervisor, m_stats, this);
+        m_connection = new ConnectionManager(policy(), m_coreSupervisor, m_stats, m_options, this);
         connect(m_connection, &ConnectionManager::startFinished, this, &EngineControl::startFinished, Qt::DirectConnection);
         connect(m_connection, &ConnectionManager::stopFinished, this, &EngineControl::stopFinished, Qt::DirectConnection);
         connect(m_connection, &ConnectionManager::connectionStateChanged, this, &EngineControl::connectionStateChanged, Qt::DirectConnection);
@@ -229,6 +228,7 @@ namespace Engine {
         connect(m_coreSupervisor, &CoreSupervisor::rpcConnected, m_stats, &StatsService::startLoops);
         connect(m_coreSupervisor, &CoreSupervisor::rpcConnected, m_autoSelector.get(), &AutoSelectorController::startMonitorLoop);
         m_exit = new ExitController(policy(), m_connection, m_coreSupervisor, this);
+        if (m_options.headless) m_exit->setShutdownOptions(ShutdownOptions::Headless());
 
         connect(EngineEvents::instance(), &EngineEvents::subscriptionFinished, this, [](int importedCount, bool quiet) {
             if (quiet) return;
@@ -254,13 +254,16 @@ namespace Engine {
 
         m_router = new RemoteApi::Router(this, this);
         const QPointer<RemoteApi::Router> apiRouter = m_router;
-        RemoteApi::Server::instance()->setDispatcher([apiRouter](const RemoteApi::Request &request, const RemoteApi::Responder &respond) {
-            if (apiRouter) apiRouter->dispatch(request, respond);
-            else respond(RemoteApi::Response::Error(503, "exiting", "Throne is shutting down"));
+        const QPointer<EngineHost> self = this;
+        RemoteApi::Server::instance()->setDispatcher([apiRouter, self](const RemoteApi::Request &request, const RemoteApi::Responder &respond) {
+            if (!apiRouter || !self) respond(RemoteApi::Response::Error(503, "exiting", "Throne is shutting down"));
+            // A start dispatched before the core supervisor started would strand the core.
+            else if (!self->m_apiReady) respond(RemoteApi::Response::Error(503, "starting", "Throne is starting"));
+            else apiRouter->dispatch(request, respond);
         });
     }
 
-    void EngineHost::init(EnginePolicy *frontEnd, TestObserver *testObserver) {
+    void EngineHost::init(EnginePolicy *frontEnd, TestObserver *testObserver, std::optional<BootStart> bootStart) {
         ENGINE_CHECK_MAIN_THREAD();
         if (m_initialized) {
             LOG_WARN("EngineHost::init() called again; ignored");
@@ -283,13 +286,37 @@ namespace Engine {
         // Before apply(): a state change inside apply() must reach the handler.
         m_connection->attachKillSwitch();
 
+        if (m_options.headless) {
+            Sys::KillSwitch::instance()->setOverride(m_options.killSwitchOverride);
+            if (m_options.killSwitchOverride && Configs::dataManager->settingsRepo->kill_switch) {
+                LOG_WARN(QStringLiteral("[Kill switch] kill_switch is on, but --no-kill-switch (THRONE_KILL_SWITCH) keeps it off for this run; "
+                                        "profiles stay refused until kill_switch is turned off"));
+            }
+        }
+
+        // Bound before the guard's first arm, so it already carries api_port; requests get 503 "starting" until m_apiReady.
+        RemoteApi::Server::instance()->applyAndWait(RemoteApi::EffectiveConfig().config);
+
         // Must precede the first coreStarted, or a remembered profile would start before the guard is even arming.
         Sys::KillSwitch::instance()->apply();
 
-        const auto &startSettings = Configs::dataManager->settingsRepo;
-        m_coreSupervisor->start(startSettings->remember_enable && startSettings->remember_id >= 0 ? startSettings->remember_id : -1);
+        if (bootStart) {
+            if (bootStart->profileId >= 0) m_connection->setBootStart(StartRequest{bootStart->profileId, false, bootStart->serial});
+            m_coreSupervisor->start(bootStart->profileId);
+        } else {
+            const auto &startSettings = Configs::dataManager->settingsRepo;
+            m_coreSupervisor->start(startSettings->remember_enable && startSettings->remember_id >= 0 ? startSettings->remember_id : -1);
+        }
 
-        RemoteApi::Server::instance()->apply(RemoteApi::ConfigFromSettings());
+        m_apiReady = true;
+    }
+
+    QJsonObject EngineHost::statusJson() const {
+        return m_router != nullptr ? m_router->statusJson() : QJsonObject();
+    }
+
+    void EngineHost::setResumeSuppressed(bool suppressed) {
+        m_resumeSuppressed = suppressed;
     }
 
     void EngineHost::detachFrontEnd() {
@@ -321,7 +348,7 @@ namespace Engine {
         auto suggestRestartProxy = settings->Save();
         Throne::PeriodicRunner::instance()->CheckNow();
         if (changed(MwArg::KillSwitch) || changed(MwArg::Vpn)) Sys::KillSwitch::instance()->apply();
-        if (changed(MwArg::RemoteApi)) RemoteApi::Server::instance()->apply(RemoteApi::ConfigFromSettings());
+        if (changed(MwArg::RemoteApi)) RemoteApi::Server::instance()->apply(RemoteApi::EffectiveConfig().config);
         if (changed(MwArg::Route)) {
             settings->Save();
             suggestRestartProxy = true;
@@ -434,6 +461,54 @@ namespace Engine {
     bool EngineHost::requestExit(ExitReason reason) {
         ENGINE_CHECK_MAIN_THREAD();
         return m_exit->requestExit(reason);
+    }
+
+    QString EngineHost::degradedReason() const {
+        const auto &settings = Configs::dataManager->settingsRepo;
+        const auto killSwitchFailed = [&settings] {
+            return settings->kill_switch && Sys::KillSwitch::instance()->state() == Sys::KillSwitch::State::Failed;
+        };
+        if (!m_options.headless) {
+            if (!settings->core_running) return QStringLiteral("core_unavailable");
+            if (killSwitchFailed()) return QStringLiteral("kill_switch_failed");
+            return {};
+        }
+        if (m_coreSupervisor->state() == CoreState::GaveUp) return QStringLiteral("core_gave_up");
+        if (!settings->core_running) return QStringLiteral("core_unavailable");
+        if (killSwitchFailed()) return QStringLiteral("kill_switch_failed");
+        if (RemoteApi::EffectiveConfig().config.enabled &&
+            RemoteApi::Server::instance()->lastResult().state != RemoteApi::ApplyResult::State::Listening) {
+            return QStringLiteral("api_unavailable");
+        }
+        if (m_connection->tunRestoreHeld()) return QStringLiteral("tun_unavailable");
+        if (m_resumeSuppressed) return QStringLiteral("resume_suppressed");
+        if (m_vpnAuth->authFailed()) return QStringLiteral("vpn_auth_failed");
+        if (!m_vpnAuth->pendingChallenges().isEmpty()) return QStringLiteral("vpn_challenge_pending");
+        return {};
+    }
+
+    bool EngineHost::systemProxySupported() const {
+        return m_options.systemProxy;
+    }
+
+    bool EngineHost::tunPrivileged() {
+        return m_connection->tunPrivileged();
+    }
+
+    bool EngineHost::resumesOnBoot() const {
+        return m_options.resume && (m_options.headless || Configs::dataManager->settingsRepo->remember_enable);
+    }
+
+    bool EngineHost::tunRestoreHeld() const {
+        return m_connection->tunRestoreHeld();
+    }
+
+    QString EngineHost::tunBlockedReason() {
+        return m_connection->tunBlockedReason();
+    }
+
+    bool EngineHost::runningTun() const {
+        return m_connection->runningTun();
     }
 
     void EngineHost::registerPeriodicJobs() {

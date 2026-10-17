@@ -9662,6 +9662,14 @@ Error: %1</source>
         <source>Geo asset files are already being downloaded.</source>
         <translation>地理资源文件正在下载中。</translation>
     </message>
+    <message>
+        <source>Update is unavailable while a background Throne (PID %1) runs from this installation; stop it first.</source>
+        <translation>从此安装目录运行的后台 Throne（PID %1）仍在运行，无法更新；请先停止它。</translation>
+    </message>
+    <message>
+        <source>Kill switch is blocking traffic</source>
+        <translation>Kill Switch 正在阻断流量</translation>
+    </message>
 </context>
 <context>
     <name>OtpItem</name>
@@ -11856,6 +11864,10 @@ Remove that endpoint from this routing profile as well?</source>
         <source>Stopping…</source>
         <translation>正在停止…</translation>
     </message>
+    <message>
+        <source>Kill switch is blocking traffic</source>
+        <translation>Kill Switch 正在阻断流量</translation>
+    </message>
 </context>
 <context>
     <name>Sys::CoreDiagnostics</name>
@@ -12027,6 +12039,24 @@ Remove that endpoint from this routing profile as well?</source>
     <message>
         <source>The core keeps exiting, so it is no longer restarted. Use Restart Core to try again.</source>
         <translation>核心反复退出，已不再自动重启。请使用“重启核心”重试。</translation>
+    </message>
+</context>
+<context>
+    <name>GuiStartup</name>
+    <message>
+        <source>Throne is running in the background</source>
+        <translation>Throne 正在后台运行</translation>
+    </message>
+    <message>
+        <source>A background Throne (PID %1) is running on this computer (data directory: %2). Tun mode is unavailable here while it runs; stop it or use thronectl.</source>
+        <translation>此计算机上正在运行后台 Throne（PID %1，数据目录：%2）。它运行期间此处无法使用 Tun 模式；请停止它或使用 thronectl。</translation>
+    </message>
+</context>
+<context>
+    <name>Engine::ConnectionManager</name>
+    <message>
+        <source>A background Throne (PID %1) owns Tun on this computer; stop it or use thronectl.</source>
+        <translation>此计算机上的 Tun 由后台 Throne（PID %1）占用；请停止它或使用 thronectl。</translation>
     </message>
 </context>
 </TS>

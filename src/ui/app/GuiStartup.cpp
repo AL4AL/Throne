@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QDeadlineTimer>
+#include <QDir>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QIcon>
@@ -13,6 +14,8 @@
 #include "include/engine/app/InstanceServer.h"
 #include "include/global/Configs.hpp"
 #include "include/global/Logger.hpp"
+#include "include/global/Notice.hpp"
+#include "include/sys/HostPresence.hpp"
 
 #ifdef Q_OS_WIN
 #include <3rdparty/WinCommander.hpp>
@@ -198,5 +201,17 @@ namespace GuiStartup {
             onSessionEnd(0);
         });
 #endif
+    }
+
+    void WarnAboutHeadless() {
+        const auto holder = Sys::HostPresence::OtherHeadless();
+        if (!holder) return;
+        const QString text = QCoreApplication::translate("GuiStartup", "A background Throne (PID %1) is running on this computer (data directory: %2). "
+                                                                       "Tun mode is unavailable here while it runs; stop it or use thronectl.")
+                                 .arg(QString::number(holder->pid), QDir::toNativeSeparators(holder->dataDir));
+        MW_show_log("[Warn] " + text);
+        // An autostart must not leave a parentless box behind; setTun's own notice covers an actual Tun attempt.
+        if (!Configs::dataManager->settingsRepo->flag_tray)
+            PostNotice({NoticeLevel::Warning, QCoreApplication::translate("GuiStartup", "Throne is running in the background"), text});
     }
 } // namespace GuiStartup

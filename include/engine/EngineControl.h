@@ -70,6 +70,23 @@ namespace Engine {
         // Restart; false when an exit is already running.
         virtual bool requestExit(ExitReason reason) = 0;
 
+        // "" when nothing is wrong; the headless-only codes appear only in a headless process.
+        virtual QString degradedReason() const = 0;
+
+        virtual bool systemProxySupported() const = 0;
+
+        // Main thread; may block on a privilege RPC only where the runtime options allow it.
+        virtual bool tunPrivileged() = 0;
+
+        // Whether a restart brings the running profile back.
+        virtual bool resumesOnBoot() const = 0;
+
+        // A remembered Tun the boot could not restore (headless).
+        virtual bool tunRestoreHeld() const = 0;
+
+        // Why turning Tun on would collide with another Tun owner on this host; empty when free or while ours runs.
+        virtual QString tunBlockedReason() = 0;
+
     signals:
         void startFinished(quint64 serial, int profileId, Engine::StartOutcome outcome, const QString &error);
 

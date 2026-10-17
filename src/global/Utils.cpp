@@ -533,11 +533,26 @@ void runOnUiThread(const std::function<void()> &callback, bool wait) {
     }
 }
 
+// The next argument after one of these (one or two dashes) is its value, never a link or a config to import; "--flag=value"
+// carries its own.
+static bool launchArgTakesValue(const QString &arg) {
+    static const QStringList names = {
+        QStringLiteral("appdata"), QStringLiteral("dump-configs"), QStringLiteral("data-dir"), QStringLiteral("api-listen"),
+        QStringLiteral("api-key-file"), QStringLiteral("api-allow"), QStringLiteral("restart-mode"), QStringLiteral("log-format"),
+    };
+    const int dashes = arg.startsWith(QLatin1String("--")) ? 2 : (arg.startsWith('-') ? 1 : 0);
+    return dashes > 0 && names.contains(arg.mid(dashes));
+}
+
 static QString g_pendingDeeplink;
 
 QString Deeplink_ExtractFromArgs(const QStringList &args) {
-    for (const auto &arg : args) {
-        if (arg.startsWith("throne://")) return arg;
+    for (int i = 0; i < args.size(); i++) {
+        if (launchArgTakesValue(args[i])) {
+            i++;
+            continue;
+        }
+        if (args[i].startsWith("throne://")) return args[i];
     }
     return {};
 }
@@ -566,12 +581,10 @@ static QStringList g_pendingFiles;
 
 QStringList LaunchFiles_ExtractFromArgs(const QStringList &args, const QDir &launchDir) {
     QStringList files;
-    // The value of a value-taking flag is a directory, never a config to import.
-    static const QStringList valueFlags = {QStringLiteral("-appdata"), QStringLiteral("-dump-configs")};
     for (int i = 1; i < args.size(); i++) {
         const auto &arg = args[i];
         if (arg.startsWith('-')) {
-            if (valueFlags.contains(arg)) i++;
+            if (launchArgTakesValue(arg)) i++;
             continue;
         }
         if (arg.startsWith("throne://")) continue;

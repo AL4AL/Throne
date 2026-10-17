@@ -116,6 +116,7 @@ public:
     void add_traffic_point(qint64 monoMs, bool coreRunning, const QVector<double> &values,
                            double proxyDown, double proxyUp, double directDown, double directUp);
 
+    // User start actions only: in select mode the profile becomes the pick. Engine restarts call the ConnectionManager directly.
     void profile_start(int _id = -1);
 
     void profile_stop(bool crash = false, bool block = false, bool manual = false, bool interactive = true);
@@ -255,6 +256,9 @@ private:
     QString traffic_update_cache;
     qint64 last_test_time = 0;
     bool select_mode = false;
+    // Esc leaves select mode; enabled only meanwhile, so the profile table keeps Esc for clearing its selection.
+    QShortcut *shortcut_select_cancel = nullptr;
+    void finish_select_mode(int profileId);
     ExitReason exit_reason = ExitReason::None;
     // Set by request_unattended_exit: no dialog during the teardown, and a restart stays in the tray when the window was hidden.
     bool m_exitUnattended = false;
@@ -573,8 +577,6 @@ private:
     bool confirmRestartProgram() override;
 
     void testSessionBusy(const QString &text) override;
-
-    bool pickInsteadOfStart(int profileId) override;
 
     void exitProgram(ExitReason reason, bool unattended) override;
 
