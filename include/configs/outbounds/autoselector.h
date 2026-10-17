@@ -15,13 +15,13 @@ namespace Configs
         QString AutoSelectorCloseCount(int activeSize, int buildLimit);
     }
 
-    // Membership resolves at build time from gid; ranking is client-side, best first in pool.
+    // Membership resolves at build time from gids; ranking is client-side, best first in pool.
     class autoSelector : public outbound
     {
     public:
         bool HasServerEndpoint() override { return false; }
 
-        int gid = -1;
+        QList<int> gids; // tracked groups, in the user's order
         QString nameFilter;             // regex over the profile name, empty = all
         QString countryFilter;          // comma-separated ISO codes, empty = all
         bool excludeUnavailable = true;
@@ -64,8 +64,10 @@ namespace Configs
 
         QString DisplayType() override { return QObject::tr("Auto Selector"); }
 
-        // The tracked group's name; defined in the .cpp because it reaches the group repository.
+        // The tracked groups' names; defined in the .cpp because it reaches the group repository.
         QString DisplayAddress() override;
+
+        [[nodiscard]] bool Tracks(int gid) const { return gids.contains(gid); }
 
         // No security of its own; it inherits whatever its members use.
         SecurityInfo GetSecurity() override { return {}; }
@@ -77,7 +79,12 @@ namespace Configs
         {
             if (object.isEmpty()) return false;
             if (object.contains("name")) name = object["name"].toString();
-            if (object.contains("gid")) gid = object["gid"].toInt(-1);
+            // "gid" is the single-group form older builds wrote, and still read.
+            if (object.contains("gids")) {
+                gids = QJsonArray2QListInt(object["gids"].toArray());
+            } else if (const int gid = object["gid"].toInt(-1); gid >= 0) {
+                gids = {gid};
+            }
             if (object.contains("name_filter")) nameFilter = object["name_filter"].toString();
             if (object.contains("country_filter")) countryFilter = object["country_filter"].toString();
             if (object.contains("exclude_unavailable")) excludeUnavailable = object["exclude_unavailable"].toBool(true);
@@ -114,7 +121,8 @@ namespace Configs
             QJsonObject object;
             object["name"] = name;
             object["type"] = "autoselector";
-            object["gid"] = gid;
+            object["gids"] = QListInt2QJsonArray(gids);
+            object["gid"] = gids.value(0, -1);
             object["name_filter"] = nameFilter;
             object["country_filter"] = countryFilter;
             object["exclude_unavailable"] = excludeUnavailable;
@@ -154,6 +162,11 @@ namespace Configs
         // Clamps what a hand-edited profile could put out of range; runs before every build.
         void Normalize()
         {
+            QList<int> tracked;
+            for (int gid : std::as_const(gids)) {
+                if (gid >= 0 && !tracked.contains(gid)) tracked << gid;
+            }
+            gids = tracked;
             if (poolCap < 1) poolCap = 1;
             if (poolCap > kMaxPoolCap) poolCap = kMaxPoolCap;
             if (buildLimit < 1) buildLimit = 1;

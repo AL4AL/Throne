@@ -8,7 +8,7 @@
 # Throne --check prints the commands.
 [Unit]
 Description=Throne (headless, user)
-Documentation=https://github.com/throneproj/Throne/blob/dev/docs/headless.md
+Documentation=https://throneproj.github.io/headless/
 After=network-online.target
 
 [Service]

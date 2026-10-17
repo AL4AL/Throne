@@ -56,10 +56,13 @@ namespace Configs
 
     QString autoSelector::DisplayAddress()
     {
-        if (gid < 0) return QObject::tr("no group");
-        auto group = dataManager->groupsRepo->GetGroup(gid);
-        if (group == nullptr) return QObject::tr("missing group");
-        return group->name;
+        if (gids.isEmpty()) return QObject::tr("no group");
+        QStringList names;
+        for (int gid : std::as_const(gids)) {
+            if (auto group = dataManager->groupsRepo->GetGroup(gid); group != nullptr) names << group->name;
+        }
+        if (names.isEmpty()) return QObject::tr("missing group");
+        return names.join(QStringLiteral(", "));
     }
 
     void autoSelector::Validate(Validation::Issues &issues)

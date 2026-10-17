@@ -17,15 +17,13 @@
 #include "include/engine/tests/TestRunner.h"
 #include "include/engine/vpn/VpnAuthController.h"
 #include "include/engine/vpn/VpnEndpoints.h"
-#include "include/global/CountryHelper.hpp"
-#include "include/global/HTTPRequestHelper.hpp"
+#include "include/global/ExitLookup.hpp"
 #include "include/global/Logger.hpp"
 #include "include/global/RunningProfiles.hpp"
 #include "include/global/Utils.hpp"
 #include "include/sys/KillSwitch.hpp"
 
 #include <QHostAddress>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QMutexLocker>
 
@@ -245,6 +243,8 @@ namespace Engine {
 
             runOnUiThread([=, this] {
                 m_geoRetriedProfile = -1;
+                // The profile object outlives the run, so an earlier run's answer would linger, for good with the lookup off.
+                ent->runningCountryInfo.clear();
                 clearRestartNeeded();
                 m_vpnAuth->noteRunStarted();
                 emit statusChanged();
@@ -254,7 +254,7 @@ namespace Engine {
                 // "Only route advertised network" rejects this probe.
                 if (exitIsEndpoint) return;
 
-                if (m_options.exitCountryLookup) lookupExitCountry(ent);
+                if (m_options.exitCountryLookup && Configs::dataManager->settingsRepo->exit_country_lookup) lookupExitCountry(ent);
             });
 
             return true;
@@ -544,19 +544,20 @@ namespace Engine {
     }
 
     void ConnectionManager::lookupExitCountry(const std::shared_ptr<Configs::Profile> &ent) {
+        ENGINE_CHECK_MAIN_THREAD();
+        const QString provider = Configs::dataManager->settingsRepo->exit_lookup_provider;
         // Off the UI thread: HttpGet spins a nested event loop that would re-enter API dispatch.
         runOnNewThread([=, this] {
-            const auto resp = Configs_network::NetworkRequestHelper::HttpGet("http://ip-api.com/json/", true);
-            if (!resp.error.isEmpty()) return;
-            const QJsonDocument doc = QJsonDocument::fromJson(resp.data);
-            if (!doc.isObject()) return;
-            const QJsonObject obj = doc.object();
-            const QString city = obj["city"].toString();
-            const QString countryName = obj["country"].toString();
-            const QString countryCode = obj["countryCode"].toString();
+            QString error;
+            const auto info = Configs_network::LookupExit(provider, &error);
+            if (!info.hasCountry()) {
+                LOG_DEBUG(QStringLiteral("[ExitLookup] no exit country: %1").arg(error));
+                return;
+            }
+            const QString text = Configs_network::ExitLocationText(info);
             runOnUiThread([=, this] {
                 if (runningSnapshot() != ent) return;
-                ent->runningCountryInfo = QString("%1 %2, %3").arg(CountryCodeToFlag(countryCode), countryName, city);
+                ent->runningCountryInfo = text;
                 emit statusChanged();
             });
         });

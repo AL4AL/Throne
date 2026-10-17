@@ -124,7 +124,7 @@ namespace Engine {
             auto ent = Configs::dataManager->profilesRepo->GetProfile(id);
             if (ent == nullptr) continue;
             auto selector = ent->AutoSelector();
-            if (selector == nullptr || selector->gid != gid) continue;
+            if (selector == nullptr || !selector->Tracks(gid)) continue;
 
             const auto gone = [](int memberID) {
                 return Configs::dataManager->profilesRepo->GetProfile(memberID) == nullptr;

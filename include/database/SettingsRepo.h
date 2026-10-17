@@ -68,6 +68,9 @@ namespace Configs {
         QString test_latency_url = "http://cp.cloudflare.com/";
         // Fetched WITHOUT any proxy, so it must be reachable directly; empty falls back to the OS.
         QString direct_test_url = "";
+        // Both keys are shared with the Android app's settings table; the provider is a Configs_network::ExitLookupProviders() id.
+        bool exit_country_lookup = true;
+        QString exit_lookup_provider = "auto";
         int url_test_timeout_ms = 3000;
         bool disable_tray = false;
         int test_concurrent = 10;

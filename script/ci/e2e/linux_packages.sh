@@ -374,7 +374,7 @@ main() {
     [ ! -e "$THRONE" ] || fail "apt-get remove left $THRONE"
     pk_eq "package state after remove" "$(dpkg-query -W -f='${Status}' throne 2>/dev/null || true)" "deinstall ok config-files"
     [ -f /etc/throne/throne.env ] || fail "apt-get remove deleted the conffile /etc/throne/throne.env; only purge may"
-    [ -d "$DATA" ] || fail "apt-get remove deleted $DATA, which docs/headless.md says stays"
+    [ -d "$DATA" ] || fail "apt-get remove deleted $DATA, which the headless docs say stays"
     pk_session_clean apt-get-remove
 
     step "L1: apt-get purge leaves no /etc/throne"

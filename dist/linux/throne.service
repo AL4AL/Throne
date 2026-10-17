@@ -1,6 +1,6 @@
 [Unit]
 Description=Throne proxy manager (headless)
-Documentation=https://github.com/throneproj/Throne/blob/dev/docs/headless.md
+Documentation=https://throneproj.github.io/headless/
 Wants=network-online.target
 After=network-online.target time-sync.target
 StartLimitIntervalSec=0

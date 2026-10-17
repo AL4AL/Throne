@@ -557,6 +557,32 @@ namespace Configs {
                    (profile->outbound->IsXray() || profile->outbound->IsXrayFullConfig());
         }
 
+        QList<int> groupProxyIDs(int gid)
+        {
+            const auto group = dataManager->groupsRepo->GetGroup(gid);
+            if (group == nullptr) return {};
+            QList<int> ids;
+            if (group->front_proxy_id >= 0) ids << group->front_proxy_id;
+            if (group->landing_proxy_id >= 0) ids << group->landing_proxy_id;
+            return ids;
+        }
+
+        // A selector member is wrapped in its own group's front/landing, never the selector group's.
+        QList<int> memberGroupProxyIDs(const QList<int> &memberIDs)
+        {
+            QSet<int> groups;
+            QList<int> ids;
+            for (int pid : memberIDs) {
+                const auto member = getProfile(pid);
+                if (member == nullptr || groups.contains(member->gid)) continue;
+                groups.insert(member->gid);
+                for (int id : groupProxyIDs(member->gid)) {
+                    if (!ids.contains(id)) ids << id;
+                }
+            }
+            return ids;
+        }
+
         // Decided up front: the sidecar's DNS carve-outs must be in place before the first connection.
         bool proxyPathUsesXray(const std::shared_ptr<Profile> &ent)
         {
@@ -574,6 +600,9 @@ namespace Configs {
                 for (int pid : plan.build) {
                     auto member = getProfile(pid);
                     if (member != nullptr && usesXrayCore(member)) return true;
+                }
+                for (int id : memberGroupProxyIDs(plan.build)) {
+                    if (auto proxy = getProfile(id); proxy != nullptr && usesXrayCore(proxy)) return true;
                 }
                 return false;
             }
@@ -750,10 +779,10 @@ namespace Configs {
                 }
                 const auto entHopIDs = unwrapChain(ctx.ent->id);
                 for (int hopID : entHopIDs) usedProfileIDs << hopID;
-                if (auto entGroup = dataManager->groupsRepo->GetGroup(ctx.ent->gid); entGroup != nullptr) {
-                    if (entGroup->front_proxy_id >= 0) usedProfileIDs << entGroup->front_proxy_id;
-                    if (entGroup->landing_proxy_id >= 0) usedProfileIDs << entGroup->landing_proxy_id;
-                }
+                const auto entGroupProxyIDs = ctx.ent->type == "autoselector"
+                                                  ? memberGroupProxyIDs(PlanAutoSelector(ctx.ent).build)
+                                                  : groupProxyIDs(ctx.ent->gid);
+                for (int proxyID : entGroupProxyIDs) usedProfileIDs << proxyID;
                 int auxSuffix = 0;
                 for (int endpointID : routeChain->endpointProfileIDs) {
                     auto endpointEnt = getProfile(endpointID);
@@ -834,12 +863,10 @@ namespace Configs {
                 parseSelectorList(proxySets, sinkFor(preReqs.dns.proxy));
                 if (!proxySets.isEmpty()) preReqs.dns.needProxyDnsRules = true;
             }
-            if (auto group = dataManager->groupsRepo->GetGroup(ctx.ent->gid); group != nullptr)
+            // proxyPathUsesXray already weighed a selector's member groups; its own group wraps nothing.
+            if (ctx.ent->type != "autoselector")
             {
-                QList<int> groupEnts;
-                if (auto frontEntID = group->front_proxy_id; frontEntID >= 0) groupEnts << frontEntID;
-                if (auto landingEntID = group->landing_proxy_id; landingEntID >= 0) groupEnts << landingEntID;
-                for (const auto &id : groupEnts)
+                for (const auto &id : groupProxyIDs(ctx.ent->gid))
                 {
                     if (auto pe = getProfile(id); pe != nullptr && usesXrayCore(pe)) ctx.proxyUsesXray = true;
                 }
@@ -1788,7 +1815,7 @@ namespace Configs {
             return invalid;
         }
 
-        QString buildAutoSelectorGroup(BuildContext &ctx, const std::shared_ptr<Group> &group, bool warpWrap)
+        QString buildAutoSelectorGroup(BuildContext &ctx, bool warpWrap)
         {
             const auto &settings = *dataManager->settingsRepo;
             auto selector = ctx.ent->AutoSelector();
@@ -1824,15 +1851,20 @@ namespace Configs {
             int bridgeCount = 0;
             // One member the core rejects fails the whole group's start, so drop it instead.
             const auto invalid = invalidProfileIDs(plan.build);
+            // A member runs as if started on its own: wrapped in its own group's landing/front.
+            QHash<int, std::shared_ptr<Group>> memberGroups;
             for (int id : plan.build)
             {
                 if (invalid.contains(id)) continue;
                 auto member = generateEndpointLive(getProfile(id));
                 if (member == nullptr) continue;
+                if (!memberGroups.contains(member->gid))
+                    memberGroups.insert(member->gid, dataManager->groupsRepo->GetGroup(member->gid));
+                const auto group = memberGroups.value(member->gid);
                 QList<int> hopIDs;
-                if (group->landing_proxy_id >= 0) hopIDs.append(group->landing_proxy_id);
+                if (group != nullptr && group->landing_proxy_id >= 0) hopIDs.append(group->landing_proxy_id);
                 hopIDs.append(id);
-                if (group->front_proxy_id >= 0) hopIDs.append(group->front_proxy_id);
+                if (group != nullptr && group->front_proxy_id >= 0) hopIDs.append(group->front_proxy_id);
                 const auto bridges = bridgesFor(hopIDs);
                 bridgeCount += bridges.count();
                 planned.append({member, hopIDs, bridges});
@@ -1973,7 +2005,7 @@ namespace Configs {
             const bool warpWrap = dataManager->settingsRepo->enable_warp;
             if (ctx.ent->type == "autoselector")
             {
-                buildAutoSelectorGroup(ctx, group, warpWrap);
+                buildAutoSelectorGroup(ctx, warpWrap);
                 if (!ctx.error.isEmpty()) return;
                 if (warpWrap)
                 {

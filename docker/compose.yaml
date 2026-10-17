@@ -1,4 +1,4 @@
-# Headless Throne; docs/headless.md has the full guide. Manage it with thronectl inside the container, where the
+# Headless Throne; https://throneproj.github.io/headless/ has the full guide. Manage it with thronectl inside the container, where the
 # management API listens (loopback only by default):
 #   docker compose exec throne sh -c 'eval "$(/opt/Throne/Throne --print-connection)" && thronectl status'
 #   docker compose exec -T throne sh -c 'eval "$(/opt/Throne/Throne --print-connection)" && thronectl import -' < links.txt

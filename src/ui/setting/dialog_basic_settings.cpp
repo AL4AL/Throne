@@ -7,6 +7,7 @@
 #include "include/ui/utils/GuiUtils.hpp"
 #include "include/global/Configs.hpp"
 #include "include/global/DeviceDetailsHelper.hpp"
+#include "include/global/ExitLookup.hpp"
 #include "include/global/Validation.hpp"
 #include "include/database/entities/Group.h"
 #include "include/engine/services/AssetUpdates.h"
@@ -163,6 +164,17 @@ DialogBasicSettings::DialogBasicSettings(QWidget *parent)
     D_LOAD_INT(test_concurrent)
     D_LOAD_STRING(test_latency_url)
     D_LOAD_STRING(direct_test_url)
+    D_LOAD_BOOL(exit_country_lookup)
+    ui->exit_lookup_provider->addItem(tr("Automatic"), Configs_network::ExitLookupAutoId);
+    for (const auto &provider : Configs_network::ExitLookupProviders()) ui->exit_lookup_provider->addItem(provider.label, provider.id);
+    ui->exit_lookup_provider->setCurrentIndex(
+        std::max(0, ui->exit_lookup_provider->findData(Configs::dataManager->settingsRepo->exit_lookup_provider)));
+    ui->label_exit_lookup_provider->setEnabled(ui->exit_country_lookup->isChecked());
+    ui->exit_lookup_provider->setEnabled(ui->exit_country_lookup->isChecked());
+    connect(ui->exit_country_lookup, &QCheckBox::toggled, this, [this](bool enabled) {
+        ui->label_exit_lookup_provider->setEnabled(enabled);
+        ui->exit_lookup_provider->setEnabled(enabled);
+    });
     D_LOAD_BOOL(disable_tray)
     ui->reset_proxy_on_disable_sp->setChecked(Configs::dataManager->settingsRepo->reset_proxy_on_disable_sp);
     ui->url_timeout->setText(Int2String(Configs::dataManager->settingsRepo->url_test_timeout_ms));
@@ -540,6 +552,8 @@ void DialogBasicSettings::accept() {
     D_SAVE_INT(test_concurrent)
     Configs::dataManager->settingsRepo->test_latency_url = ui->test_latency_url->text().trimmed();
     Configs::dataManager->settingsRepo->direct_test_url = ui->direct_test_url->text().trimmed();
+    D_SAVE_BOOL(exit_country_lookup)
+    Configs::dataManager->settingsRepo->exit_lookup_provider = ui->exit_lookup_provider->currentData().toString();
     D_SAVE_BOOL(disable_tray)
     Configs::dataManager->settingsRepo->proxy_scheme = ui->proxy_scheme->currentText().toLower();
     Configs::dataManager->settingsRepo->speed_test_mode = ui->speedtest_mode->currentIndex();

@@ -12,7 +12,11 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGuiApplication>
+#include <QListWidget>
 #include <QScreen>
+#include <QSet>
+
+#include <algorithm>
 
 EditAutoSelector::EditAutoSelector(QWidget *parent) : QWidget(parent), ui(new Ui::EditAutoSelector) {
     ui->setupUi(this);
@@ -51,7 +55,10 @@ EditAutoSelector::EditAutoSelector(QWidget *parent) : QWidget(parent), ui(new Ui
     connect(ui->balance, &QCheckBox::toggled, this, [this] { updateBalanceEnabled(); });
     connect(ui->balance_mode, &QComboBox::currentIndexChanged, this, [this] { updateBalanceEnabled(); });
 
-    connect(ui->group, &QComboBox::currentIndexChanged, this, [this] { refreshPlanSummary(); });
+    connect(ui->groups, &QListWidget::itemChanged, this, [this] {
+        if (form) form->revalidate(ui->groups);
+        refreshPlanSummary();
+    });
     connect(ui->name_filter, &QLineEdit::textChanged, this, [this] { refreshPlanSummary(); });
     connect(ui->country_filter, &QLineEdit::textChanged, this, [this] { refreshPlanSummary(); });
     connect(ui->exclude_unavailable, &QCheckBox::toggled, this, [this] { refreshPlanSummary(); });
@@ -93,6 +100,45 @@ void EditAutoSelector::mirrorTooltipsToLabels() const {
     }
 }
 
+void EditAutoSelector::fillGroups(const QList<int> &tracked) {
+    ui->groups->clear();
+    m_missingGids.clear();
+    const QSet<int> trackedSet(tracked.begin(), tracked.end());
+    auto order = Configs::dataManager->groupsRepo->GetGroupsTabOrder();
+    for (int gid : tracked) {
+        if (!order.contains(gid)) order << gid;
+    }
+    for (int gid : order) {
+        auto group = Configs::dataManager->groupsRepo->GetGroup(gid);
+        if (group == nullptr) {
+            if (trackedSet.contains(gid) && !m_missingGids.contains(gid)) m_missingGids << gid;
+            continue;
+        }
+        // An archived group is listed only while tracked, so saving never drops it unseen.
+        if (group->archive && !trackedSet.contains(gid)) continue;
+        auto *item = new QListWidgetItem(group->name);
+        item->setFlags(Qt::ItemIsUserCheckable | Qt::ItemIsEnabled);
+        item->setData(Qt::UserRole, gid);
+        item->setCheckState(trackedSet.contains(gid) ? Qt::Checked : Qt::Unchecked);
+        ui->groups->addItem(item);
+    }
+
+    // Up to five rows, then it scrolls; measured from a real row so fonts and scaling never clip it.
+    const int rowHeight = std::max(ui->groups->count() > 0 ? ui->groups->sizeHintForRow(0) : 0,
+                                   ui->groups->fontMetrics().height());
+    const int rows = qBound(1, ui->groups->count(), 5);
+    ui->groups->setFixedHeight(rows * rowHeight + 2 * ui->groups->frameWidth());
+}
+
+QList<int> EditAutoSelector::checkedGroupIDs() const {
+    QList<int> ids;
+    for (int i = 0; i < ui->groups->count(); i++) {
+        const auto *item = ui->groups->item(i);
+        if (item->checkState() == Qt::Checked) ids << item->data(Qt::UserRole).toInt();
+    }
+    return ids;
+}
+
 void EditAutoSelector::onStart(std::shared_ptr<Configs::Profile> _ent) {
     this->ent = _ent;
     auto outbound = this->ent->AutoSelector();
@@ -101,13 +147,7 @@ void EditAutoSelector::onStart(std::shared_ptr<Configs::Profile> _ent) {
     // Every setValue below fires valueChanged, which would replan against a half-filled form.
     m_loading = true;
 
-    for (int gid : Configs::dataManager->groupsRepo->GetGroupsTabOrder()) {
-        auto group = Configs::dataManager->groupsRepo->GetGroup(gid);
-        if (group == nullptr || group->archive) continue;
-        ui->group->addItem(group->name, group->id);
-    }
-    const int trackedGid = outbound->gid >= 0 ? outbound->gid : this->ent->gid;
-    if (const int idx = ui->group->findData(trackedGid); idx >= 0) ui->group->setCurrentIndex(idx);
+    fillGroups(outbound->gids.isEmpty() ? QList<int>{this->ent->gid} : outbound->gids);
 
     ui->name_filter->setText(outbound->nameFilter);
     ui->country_filter->setText(outbound->countryFilter);
@@ -158,7 +198,12 @@ bool EditAutoSelector::onEnd() {
     auto outbound = this->ent->AutoSelector();
     if (outbound == nullptr) return false;
 
-    outbound->gid = ui->group->currentData().toInt();
+    const auto gids = checkedGroupIDs();
+    if (gids.isEmpty()) {
+        MessageBoxWarning(software_name, tr("Check at least one group for this auto selector to track."));
+        return false;
+    }
+    outbound->gids = gids;
     outbound->nameFilter = ui->name_filter->text().trimmed();
     outbound->countryFilter = ui->country_filter->text().trimmed();
     outbound->excludeUnavailable = ui->exclude_unavailable->isChecked();
@@ -200,8 +245,9 @@ bool EditAutoSelector::onEnd() {
 void EditAutoSelector::bindValidation(Validation::Form &form) {
     using namespace Validation;
     using namespace Configs::Checks;
-    form.addRule({ui->group}, [this] {
-        return ui->group->currentIndex() < 0 ? tr("Select the group this auto selector should track.") : QString();
+    this->form = &form;
+    form.addRule({ui->groups}, [this] {
+        return checkedGroupIDs().isEmpty() ? tr("Check at least one group for this auto selector to track.") : QString();
     }, this);
     form.bind(ui->name_filter, Rules::Regex(), this);
     form.bind(ui->country_filter, AutoSelectorCountries, this);
@@ -294,7 +340,8 @@ void EditAutoSelector::refreshPlanSummary() {
     probe->id = this->ent->id;
     probe->gid = this->ent->gid;
     auto *preview = probe->AutoSelector();
-    preview->gid = ui->group->currentData().toInt();
+    const auto checked = checkedGroupIDs();
+    preview->gids = checked.isEmpty() ? checked : checked + m_missingGids;
     preview->nameFilter = ui->name_filter->text().trimmed();
     preview->countryFilter = ui->country_filter->text().trimmed();
     preview->excludeUnavailable = ui->exclude_unavailable->isChecked();
@@ -310,10 +357,14 @@ void EditAutoSelector::refreshPlanSummary() {
     }
 
     QStringList lines;
-    lines << tr("%1 of %2 profiles in the group can be used; %3 would run.")
+    lines << tr("%1 of %2 profiles in the checked groups can be used; %3 would run.")
                  .arg(plan.eligible)
-                 .arg(plan.membersInGroup)
+                 .arg(plan.membersInGroups)
                  .arg(plan.build.size());
+    if (plan.missingGroups > 0) {
+        lines << tr("%n tracked group(s) no longer exist and are ignored; saving removes them.", nullptr,
+                    plan.missingGroups);
+    }
     if (!plan.skipped.isEmpty()) {
         QStringList reasons;
         for (const auto &[skip, count] : plan.skipped) {

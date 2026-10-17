@@ -252,6 +252,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         Configs::dataManager->groupsRepo->SetGroupsTabOrder(tabOrder);
         on_tabWidget_currentChanged(ui->tabWidget->tabBar()->currentIndex());
     });
+    // Carries profile names and the exit lookup service's answer; as AutoText a tag on the first line renders it all as HTML.
+    ui->label_running->setTextFormat(Qt::PlainText);
     ui->label_running->installEventFilter(this);
     ui->label_inbound->installEventFilter(this);
     ui->splitter->installEventFilter(this);

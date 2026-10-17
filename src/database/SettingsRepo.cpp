@@ -91,6 +91,7 @@ namespace Configs {
             {"connection_sort_asc", &connection_sort_asc},
             {"traffic_graph_smooth", &traffic_graph_smooth},
             {"traffic_graph_markers", &traffic_graph_markers},
+            {"exit_country_lookup", &exit_country_lookup},
         };
 
         intMap = {
@@ -135,6 +136,7 @@ namespace Configs {
             {"user_agent2",                &user_agent},
             {"test_url",                   &test_latency_url},
             {"direct_test_url",            &direct_test_url},
+            {"exit_lookup_provider",       &exit_lookup_provider},
             {"inbound_address",            &inbound_address},
             {"log_level",                  &log_level},
             {"log_file_level",             &log_file_level},

@@ -1,4 +1,4 @@
-# Headless Throne: ghcr.io/throneproj/throne. docs/headless.md covers running it; compose.yaml is an example.
+# Headless Throne: ghcr.io/throneproj/throne. https://throneproj.github.io/headless/ covers running it; compose.yaml is an example.
 #
 # The build context holds the bundled Linux builds as linux-amd64/ and linux-arm64/ (one is enough for a single platform):
 #   - CI: each Throne-<tag>-linux-<arch>.zip unzipped, its Throne/ dir renamed to linux-<arch>/;
