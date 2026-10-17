@@ -158,8 +158,9 @@ namespace Validation {
             formRestyle(widget);
         }
 
-        QIcon formMarkIcon(const QWidget *widget, FormMark mark) {
-            return widget->style()->standardIcon(mark == FormMark::Error ? QStyle::SP_MessageBoxCritical : QStyle::SP_MessageBoxWarning);
+        // Cached: every bound line edit takes one, and an uncached load costs about 9 ms.
+        QIcon formMarkIcon(FormMark mark) {
+            return themeManager()->standardIcon(mark == FormMark::Error ? QStyle::SP_MessageBoxCritical : QStyle::SP_MessageBoxWarning);
         }
 
         QColor formMarkColor(FormMark mark) {
@@ -193,7 +194,7 @@ namespace Validation {
         }
 
         QAction *formAddMarkAction(QLineEdit *edit, QObject *context) {
-            auto *action = edit->addAction(formMarkIcon(edit, FormMark::Error), QLineEdit::TrailingPosition);
+            auto *action = edit->addAction(formMarkIcon(FormMark::Error), QLineEdit::TrailingPosition);
             action->setVisible(false);
             QObject::connect(action, &QAction::triggered, context, [action, edit] {
                 QWidget *anchor = edit;
@@ -464,7 +465,7 @@ namespace Validation {
             if (mark != state.mark) {
                 state.mark = mark;
                 formRepolish(widget, mark);
-                if (state.action && marked) state.action->setIcon(formMarkIcon(widget, mark));
+                if (state.action && marked) state.action->setIcon(formMarkIcon(mark));
             }
             QStringList texts;
             for (const auto &m: std::as_const(state.messages)) {
