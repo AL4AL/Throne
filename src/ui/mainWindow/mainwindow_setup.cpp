@@ -650,6 +650,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             trayClickEvent();
         }
     });
+    connect(tray, &TrayIcon::dockIconClicked, this, [=,this] { ActivateWindow(this); });
 
     syncSettingsMirrors();
     ui->actionStart_with_system->setChecked(AutoRun_IsEnabled());
