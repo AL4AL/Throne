@@ -1114,14 +1114,21 @@ jobs:
         run: |
           curl -Lo - https://github.com/tcnksm/ghr/releases/download/v0.17.0/ghr_v0.17.0_linux_amd64.tar.gz | tar xzv
           mv ghr*linux_amd64/ghr .
+      # The changelog is written above the generated download table after publishing.
+      - name: Generating release notes
+        env:
+          TAG: ${{ github.event.inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          sed "s|{{TAG}}|$TAG|g; s|{{REPO}}|$REPO|g" .github/release_template.md > "$RUNNER_TEMP/release.md"
       - name: PreRelease
         if: github.event.inputs.publish == 'p'
         run: |
-          ./ghr -prerelease -delete -c ${{ github.sha }} -t "${{ github.token }}" -n "${{ github.event.inputs.tag }}" "${{ github.event.inputs.tag }}" deployment
+          ./ghr -prerelease -delete -c ${{ github.sha }} -t "${{ github.token }}" -n "${{ github.event.inputs.tag }}" -b "$(cat "$RUNNER_TEMP/release.md")" "${{ github.event.inputs.tag }}" deployment
       - name: Release
         if: github.event.inputs.publish == 'r'
         run: |
-          ./ghr -delete -c ${{ github.sha }} -t "${{ github.token }}" -n "${{ github.event.inputs.tag }}" "${{ github.event.inputs.tag }}" deployment
+          ./ghr -delete -c ${{ github.sha }} -t "${{ github.token }}" -n "${{ github.event.inputs.tag }}" -b "$(cat "$RUNNER_TEMP/release.md")" "${{ github.event.inputs.tag }}" deployment
   # Updates the AUR package after a stable release.
   publish-aur:
     name: Publish AUR Package
