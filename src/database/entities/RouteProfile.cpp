@@ -164,6 +164,7 @@ namespace Configs {
         auto cleanRules = get_simple_rules();
         for (auto &r : cleanRules) {
             if (r->type == rule->type) {
+                r->disabled = rule->disabled;
                 rule = std::move(r);
                 return;
             }
@@ -199,10 +200,10 @@ namespace Configs {
         return static_cast<double>(whole) == val.toDouble() ? QString::number(whole) : QString::number(val.toDouble());
     }
 
-    // name, type and outbound, plus exactly the keys RouteRule::set_field_value stores.
+    // name, type, outbound and disabled, plus exactly the keys RouteRule::set_field_value stores.
     static bool isStorableRuleKey(const QString& key) {
         static const QSet<QString> keys = {
-            "name", "type", "outbound",
+            "name", "type", "outbound", "disabled",
             "ip_version", "network", "protocol", "inbound", "domain", "domain_suffix", "domain_keyword", "domain_regex",
             "source_ip_cidr", "source_ip_is_private", "ip_cidr", "ip_is_private", "source_port", "source_port_range",
             "port", "port_range", "process_name", "process_path", "process_path_regex", "package_name",
@@ -289,6 +290,10 @@ namespace Configs {
         for (const auto& key: obj.keys()) {
             if (key == "name" || key == "type") continue;
             auto val = obj.value(key);
+            if (key == "disabled") {
+                rule->disabled = val.toBool();
+                continue;
+            }
             if (key == "outbound") {
                 if (val.isDouble()) {
                     const int id = val.toInt();
@@ -782,7 +787,7 @@ namespace Configs {
             return obj;
         };
         for (const auto &item: Rules) {
-            if (item->type != custom && item->isEmpty()) continue;
+            if (item->disabled || (item->type != custom && item->isEmpty())) continue;
             auto outboundTag = QString();
             if (outboundMap.contains(item->outboundID)) outboundTag = outboundMap[item->outboundID];
             // an endpoint that left the list has no tag to gate on; skip instead of aborting the build
@@ -869,7 +874,7 @@ namespace Configs {
         }
         for (const auto& item: Rules) {
             // its id names an endpoint built from endpointProfileIDs, not a routing outbound
-            if (item->type == endpointPreferredBy) continue;
+            if (item->disabled || item->type == endpointPreferredBy) continue;
             // Only these emit their outbound; a stale id left on another action must not fail the build.
             if (const auto action = item->effective_action(); action != "route" && action != "bypass") continue;
             res->push_back(item->outboundID);
@@ -880,6 +885,7 @@ namespace Configs {
     std::shared_ptr<QStringList> RouteProfile::get_used_rule_sets() {
         auto res = std::make_shared<QStringList>();
         for (const auto& item: Rules) {
+            if (item->disabled) continue;
             for (const auto& ruleItem: item->rule_set) {
                 res->push_back(ruleItem);
             }
@@ -890,7 +896,7 @@ namespace Configs {
     QStringList RouteProfile::get_direct_sites() {
         auto res = QStringList();
         for (const auto& item: Rules) {
-            if (item->outboundID == directID && item->action == "route") {
+            if (!item->disabled && item->outboundID == directID && item->action == "route") {
                 for (const auto& rset: item->rule_set) {
                     if (rset.startsWith("geosite-")) res << QString("ruleset:" + rset);
                 }
@@ -914,7 +920,7 @@ namespace Configs {
     QStringList RouteProfile::get_proxy_sites() {
         auto res = QStringList();
         for (const auto& item: Rules) {
-            if (item->outboundID == proxyID && item->action == "route") {
+            if (!item->disabled && item->outboundID == proxyID && item->action == "route") {
                 for (const auto& rset: item->rule_set) {
                     if (rset.startsWith("geosite-")) res << QString("ruleset:" + rset);
                 }
@@ -939,7 +945,7 @@ namespace Configs {
     {
         auto res = QStringList();
         for (const auto& item: Rules) {
-            if (item->outboundID == directID && item->action == "route") {
+            if (!item->disabled && item->outboundID == directID && item->action == "route") {
                 for (const auto& rset: item->rule_set) {
                     if (rset.startsWith("geoip-")) res << QString("ruleset:" + rset);
                 }
@@ -955,7 +961,7 @@ namespace Configs {
     {
         auto res = QStringList();
         for (const auto& item: Rules) {
-            if (item->action == "route" && item->outboundID == directID) continue;
+            if (item->disabled || (item->action == "route" && item->outboundID == directID)) continue;
             if (item->action != "route" && item->action != "reject") continue;
             // ip_is_private covers every range the Tun bypass carves out, so it hijacks all of them at once.
             if (item->ip_is_private) res << dataManager->settingsRepo->vpn_private_ranges;
@@ -1197,7 +1203,7 @@ namespace Configs {
         for (const auto& rule : Rules) {
             if (rule->type == ownType) break;
             const auto other = addressAction(rule->type);
-            if (!other || *other == action) continue;
+            if (!other || *other == action || rule->disabled) continue;
 
             // Every host a suffix or keyword matches contains the value, so an earlier keyword inside it catches them all.
             // The same line elsewhere does not count: adding rawRule moves it out of that list.

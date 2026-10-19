@@ -92,6 +92,7 @@ namespace Configs {
                 tls_fragment INTEGER NOT NULL DEFAULT 0,
                 tls_fragment_fallback_delay TEXT,
                 tls_record_fragment INTEGER NOT NULL DEFAULT 0,
+                disabled INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (route_profile_id, rule_order),
                 FOREIGN KEY(route_profile_id) REFERENCES route_profiles(id) ON DELETE CASCADE
             )
@@ -112,6 +113,8 @@ namespace Configs {
             db.exec("ALTER TABLE route_rules ADD COLUMN tls_fragment_fallback_delay TEXT");
         if (!routeRulesColumnExists("tls_record_fragment"))
             db.exec("ALTER TABLE route_rules ADD COLUMN tls_record_fragment INTEGER NOT NULL DEFAULT 0");
+        if (!routeRulesColumnExists("disabled"))
+            db.exec("ALTER TABLE route_rules ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0");
     }
 
     bool RoutesRepo::routeRulesColumnExists(const char* columnName) const {
@@ -137,6 +140,7 @@ namespace Configs {
         
         json["name"] = rule->name;
         json["type"] = rule->type;
+        json["disabled"] = rule->disabled;
         json["ip_version"] = rule->ip_version;
         json["network"] = rule->network;
         json["protocol"] = rule->protocol;
@@ -184,6 +188,7 @@ namespace Configs {
         
         rule->name = json["name"].toString();
         rule->type = json["type"].toInt();
+        rule->disabled = json["disabled"].toBool();
         rule->ip_version = json["ip_version"].toString();
         rule->network = json["network"].toString();
         rule->protocol = json["protocol"].toString();
@@ -389,8 +394,8 @@ namespace Configs {
                  invert, outbound_id, action, reject_method, no_drop,
                  override_address, override_port, sniffers_json, sniff_override_dest, strategy,
                  wifi_ssid_json, wifi_bssid_json, tls_spoof, tls_spoof_method, package_name_json,
-                 tls_fragment, tls_fragment_fallback_delay, tls_record_fragment)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 tls_fragment, tls_fragment_fallback_delay, tls_record_fragment, disabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             )",
                 id,
                 ruleOrder++,
@@ -433,7 +438,8 @@ namespace Configs {
                 packageNameJson.toStdString(),
                 rule->tls_fragment ? 1 : 0,
                 rule->tls_fragment_fallback_delay.toStdString(),
-                rule->tls_record_fragment ? 1 : 0
+                rule->tls_record_fragment ? 1 : 0,
+                rule->disabled ? 1 : 0
             );
         }
     }
@@ -485,6 +491,7 @@ namespace Configs {
         ruleJson["tls_fragment"] = stmt.getColumn(baseCol + 37).getInt() != 0;
         ruleJson["tls_fragment_fallback_delay"] = QString::fromStdString(stmt.getColumn(baseCol + 38).getText());
         ruleJson["tls_record_fragment"] = stmt.getColumn(baseCol + 39).getInt() != 0;
+        ruleJson["disabled"] = stmt.getColumn(baseCol + 40).getInt() != 0;
         return ruleJson;
     }
 
@@ -524,7 +531,7 @@ namespace Configs {
             "invert, outbound_id, action, reject_method, no_drop, "
             "override_address, override_port, sniffers_json, sniff_override_dest, strategy, "
             "wifi_ssid_json, wifi_bssid_json, tls_spoof, tls_spoof_method, package_name_json, "
-            "tls_fragment, tls_fragment_fallback_delay, tls_record_fragment "
+            "tls_fragment, tls_fragment_fallback_delay, tls_record_fragment, disabled "
             "FROM route_rules WHERE route_profile_id IN (" + idList.toStdString() + ") ORDER BY route_profile_id, rule_order";
         auto rulesQuery = db.query(sql);
         if (!rulesQuery) return;
@@ -559,7 +566,7 @@ namespace Configs {
                    invert, outbound_id, action, reject_method, no_drop,
                    override_address, override_port, sniffers_json, sniff_override_dest, strategy,
                    wifi_ssid_json, wifi_bssid_json, tls_spoof, tls_spoof_method, package_name_json,
-                   tls_fragment, tls_fragment_fallback_delay, tls_record_fragment
+                   tls_fragment, tls_fragment_fallback_delay, tls_record_fragment, disabled
             FROM route_rules WHERE route_profile_id = ? ORDER BY rule_order
         )", id);
         if (rulesQuery) {
