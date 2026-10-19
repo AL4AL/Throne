@@ -5,6 +5,7 @@
 #include "include/database/GroupsRepo.h"
 #include "include/global/Configs.hpp"
 #include "include/configs/sub/RouteUpdater.hpp"
+#include "include/ui/setting/RouteDnsEditor.h"
 #include "include/ui/setting/ThemeManager.hpp"
 
 #include <srslist.h>
@@ -304,6 +305,7 @@ RouteItem::RouteItem(QWidget *parent, const std::shared_ptr<Configs::RouteProfil
 
     connect(deleteShortcut, &QShortcut::activated, this, [=, this] {
         // The shortcut is dialog-wide, so on the Endpoints page it must not reach the rule list.
+        if (ui->tabWidget->currentWidget() == dnsEditor) return;
         if (ui->tabWidget->currentWidget() == ui->endpointsTab) {
             const int row = ui->endpointList->currentRow();
             if (row >= 0) removeEndpointRow(ui->endpointList->item(row)->data(Qt::UserRole).toInt());
@@ -314,6 +316,10 @@ RouteItem::RouteItem(QWidget *parent, const std::shared_ptr<Configs::RouteProfil
 
     setupRemoteSection();
     setupEndpointsSection();
+
+    dnsEditor = new RouteDnsEditor(*chain, ui->tabWidget);
+    ui->tabWidget->addTab(dnsEditor, tr("DNS"));
+    dnsEditor->bindTo(form);
 
     updateRuleSection();
     form->markAll();
@@ -741,6 +747,8 @@ void RouteItem::accept() {
                        tr("%1 endpoint profile(s) no longer exist and were removed from this routing profile.")
                            .arg(missingEndpoints));
     }
+
+    dnsEditor->applyTo(*chain);
 
     emit settingsChanged(chain);
 

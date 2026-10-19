@@ -9,6 +9,7 @@
 #include <optional>
 
 #include "include/database/ProfilesRepo.h"
+#include "include/database/RoutesRepo.h"
 
 #include "include/configs/ParseDiagnostics.h"
 #include "include/configs/common/OutboundFactory.h"
@@ -187,10 +188,81 @@ namespace Configs {
         remoteLastUpdate = other.remoteLastUpdate;
         endpointProfileIDs = other.endpointProfileIDs;
         innerHopEndpointIDs = other.innerHopEndpointIDs;
+        customDns = other.customDns;
+        dns = other.dns;
+    }
+
+    RouteDns RouteDns::Global() {
+        const auto& settings = *Configs::dataManager->settingsRepo;
+        RouteDns res;
+        res.remote_dns = settings.remote_dns;
+        res.remote_dns_disable_ipv6 = settings.remote_dns_disable_ipv6;
+        res.direct_dns = settings.direct_dns;
+        res.direct_dns_disable_ipv6 = settings.direct_dns_disable_ipv6;
+        res.dns_final_out = settings.dns_final_out;
+        res.enable_dns_routing = settings.enable_dns_routing;
+        res.fake_dns = settings.fake_dns;
+        res.fakeip_disable_ipv6 = settings.fakeip_disable_ipv6;
+        return res;
+    }
+
+    RouteDns RouteDns::Current(bool* own) {
+        const auto custom = Configs::dataManager->routesRepo->GetCustomDns(Configs::dataManager->settingsRepo->current_route_id);
+        if (own) *own = custom.has_value();
+        return custom ? *custom : Global();
+    }
+
+    QJsonObject RouteDns::ToJson() const {
+        return {
+            {"remote_dns", remote_dns},
+            {"remote_dns_disable_ipv6", remote_dns_disable_ipv6},
+            {"direct_dns", direct_dns},
+            {"direct_dns_disable_ipv6", direct_dns_disable_ipv6},
+            {"dns_final_out", dns_final_out},
+            {"enable_dns_routing", enable_dns_routing},
+            {"fake_dns", fake_dns},
+            {"fakeip_disable_ipv6", fakeip_disable_ipv6},
+        };
+    }
+
+    RouteDns RouteDns::FromJson(const QJsonObject& obj) {
+        RouteDns res;
+        res.remote_dns = obj.value("remote_dns").toString(res.remote_dns).trimmed();
+        res.remote_dns_disable_ipv6 = obj.value("remote_dns_disable_ipv6").toBool(res.remote_dns_disable_ipv6);
+        res.direct_dns = obj.value("direct_dns").toString(res.direct_dns).trimmed();
+        res.direct_dns_disable_ipv6 = obj.value("direct_dns_disable_ipv6").toBool(res.direct_dns_disable_ipv6);
+        res.dns_final_out = obj.value("dns_final_out").toString(res.dns_final_out);
+        res.enable_dns_routing = obj.value("enable_dns_routing").toBool(res.enable_dns_routing);
+        res.fake_dns = obj.value("fake_dns").toBool(res.fake_dns);
+        res.fakeip_disable_ipv6 = obj.value("fakeip_disable_ipv6").toBool(res.fakeip_disable_ipv6);
+        return res;
+    }
+
+    QString RouteDns::Problem() const {
+        DnsAddress parsed;
+        QString why;
+        if (!ParseDnsAddress(remote_dns, &parsed, &why))
+            return QCoreApplication::translate("Validation", "Remote DNS \"%1\": %2").arg(remote_dns, why);
+        if (!ParseDnsAddress(direct_dns, &parsed, &why))
+            return QCoreApplication::translate("Validation", "Direct DNS \"%1\": %2").arg(direct_dns, why);
+        if (dns_final_out != "remote" && dns_final_out != "direct")
+            return QCoreApplication::translate("Validation", "The default DNS server must be remote or direct, not \"%1\".").arg(dns_final_out);
+        return {};
     }
 
     static void appendWarning(QString* warnings, const QString& msg) {
         if (warnings) warnings->append(msg + "\n");
+    }
+
+    static void routeProfileAdoptDns(RouteProfile& profile, const QJsonObject& root, QString* warnings) {
+        if (!root.value("dns").isObject()) return;
+        const auto dns = RouteDns::FromJson(root.value("dns").toObject());
+        if (const auto problem = dns.Problem(); !problem.isEmpty()) {
+            appendWarning(warnings, QCoreApplication::translate("Validation", "The profile's own DNS settings were dropped, so it uses the global ones: %1").arg(problem));
+            return;
+        }
+        profile.customDns = true;
+        profile.dns = dns;
     }
 
     // toString() is "" for a number, and the writer emits ports, ip_version and override_port as numbers.
@@ -582,6 +654,7 @@ namespace Configs {
         root["kind"] = "throne-route-profile";
         root["v"] = 1;
         root["name"] = name;
+        if (const auto active = ActiveDns()) root["dns"] = active->ToJson();
         QJsonArray endpointsArr;
         if (!endpointProfileIDs.isEmpty()) {
             endpointsArr = routeProfileEndpointsToJson(endpointProfileIDs, innerHopEndpointIDs, warnings);
@@ -678,6 +751,7 @@ namespace Configs {
                 QJsonObject routeObj = root.value("route").toObject();
                 routeObj = remapRawOutboundsByName(routeObj, root.value("outbound_names").toObject(), warnings);
                 profile->rawRoute = QJsonObject2QString(routeObj, false);
+                routeProfileAdoptDns(*profile, root, warnings);
                 return profile;
             }
             auto profile = std::make_shared<RouteProfile>();
@@ -713,6 +787,7 @@ namespace Configs {
                 profile->Rules << rule;
             }
             profile->SyncEndpointRules();
+            routeProfileAdoptDns(*profile, root, warnings);
             return profile;
         }
 
