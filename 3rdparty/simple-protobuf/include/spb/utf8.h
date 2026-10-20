@@ -105,7 +105,7 @@ inline uint32_t encode_point(uint32_t unicode, char utf8[4])
 
 inline bool is_valid(std::string_view str)
 {
-    constexpr size_t mask = (size_t)0x8080808080808080ULL;
+    constexpr size_t mask = (~size_t(0) / 0xFF) * 0x80;
 
     const auto *start = str.data();
     const auto *end   = str.data() + str.size() - sizeof(size_t);
