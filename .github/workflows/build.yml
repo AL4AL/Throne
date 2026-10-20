@@ -30,39 +30,39 @@ jobs:
         include:
           - cross_os: windows
             cross_arch: amd64
-            go_version: "1.27.0"
+            go_version: "1.27.2"
             runner: ubuntu-22.04
           - cross_os: windows
             cross_arch: arm64
-            go_version: "1.27.0"
+            go_version: "1.27.2"
             runner: ubuntu-22.04
           - cross_os: linux
             cross_arch: amd64
-            go_version: "1.27.0"
+            go_version: "1.27.2"
             runner: ubuntu-22.04
           - cross_os: linux
             cross_arch: arm64
-            go_version: "1.27.0"
+            go_version: "1.27.2"
             runner: ubuntu-22.04
           - cross_os: darwin
             cross_arch: amd64
-            go_version: "1.27.0"
+            go_version: "1.27.2"
             runner: macos-latest
           - cross_os: darwin
             cross_arch: arm64
-            go_version: "1.27.0"
+            go_version: "1.27.2"
             runner: macos-latest
           - cross_os: darwinlegacy
             cross_arch: amd64
-            go_version: "1.27.0"
+            go_version: "1.27.2"
             runner: macos-latest
           - cross_os: windowslegacy
             cross_arch: amd64
-            go_version: "1.27.0"
+            go_version: "1.27.2"
             runner: macos-latest
           - cross_os: windowslegacy
             cross_arch: 386
-            go_version: "1.27.0"
+            go_version: "1.27.2"
             runner: macos-latest
       fail-fast: false
     runs-on: ${{ matrix.runner }}
@@ -149,7 +149,7 @@ jobs:
       - name: Install Golang
         uses: actions/setup-go@v7.0.0
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
           cache-dependency-path: |
             core/go.sum
       - name: Install JDK 17
@@ -410,7 +410,7 @@ jobs:
       - name: Install Golang
         uses: actions/setup-go@v7.0.0
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
           cache-dependency-path: |
             throne-api/go.sum
       - name: Building thronectl
@@ -781,7 +781,7 @@ jobs:
       - name: Install Golang
         uses: actions/setup-go@v7.0.0
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
           cache-dependency-path: |
             throne-api/go.sum
       - name: Building thronectl
@@ -845,7 +845,7 @@ jobs:
       - name: Install Golang
         uses: actions/setup-go@v7.0.0
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
           cache-dependency-path: |
             throne-api/go.sum
       - name: Building thronectl
@@ -916,7 +916,7 @@ jobs:
       - name: Install Golang
         uses: actions/setup-go@v7.0.0
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
           cache-dependency-path: |
             throne-api/go.sum
       - name: Building thronectl
@@ -978,7 +978,7 @@ jobs:
       - name: Install Golang
         uses: actions/setup-go@v7.0.0
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
           cache-dependency-path: |
             throne-api/go.sum
       - name: Building thronectl
@@ -1045,7 +1045,7 @@ jobs:
       - name: Install Golang
         uses: actions/setup-go@v7.0.0
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
           cache-dependency-path: |
             throne-api/go.sum
       - name: Building thronectl
