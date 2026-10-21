@@ -1,0 +1,28 @@
+name: AL4AL CI (push)
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Engine/UI boundary
+        run: cmake -DROOT=${{ github.workspace }} -P cmake/EngineBoundary.cmake
+      - name: P0 XHTTP pin alias + HTTP-version contract
+        run: bash script/ci/p0_xhttp_pin_check.sh
+      - name: P1 sub NUL gap-check (synthetic fixture)
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("synthetic_sub.txt")
+          # line with embedded NUL then more profiles — mirrors free-list failure mode
+          p.write_bytes(b"ss://aaaa@1.2.3.4:1#ok\n" + b"ss://bbbb@1.2.3.4:2?prefix=\x00junk\n" + b"ss://cccc@1.2.3.4:3#after\n")
+          PY
+          python3 script/ci/p1_sub_nul_gapcheck.py synthetic_sub.txt
