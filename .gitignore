@@ -1,91 +1,81 @@
-# This file is used to ignore files which are generated
-# ----------------------------------------------------------------------------
 
-*~
-*.autosave
-*.a
-*.core
-*.moc
-*.o
-*.obj
-*.orig
-*.rej
-*.so
-*.so.*
-*_pch.h.cpp
-*_resource.rc
-.#*
-*.*#
-core
-!core/
-tags
-.DS_Store
-.directory
-*.debug
-/Makefile*
-*.prl
-*.app
-moc_*.cpp
-ui_*.h
-qrc_*.cpp
-Thumbs.db
-*.res
-/.qmake.cache
-/.qmake.stash
-
-# qtcreator generated files
-*.pro.user*
-
-# xemacs temporary files
-*.flc
-
-# Vim temporary files
-.*.swp
-
-# Visual Studio generated files
-*.ib_pdb_index
-*.idb
-*.ilk
-*.pdb
-*.sln
-*.suo
-*.vcproj
-*vcproj.*.*.user
-*.ncb
-*.sdf
-*.opensdf
-*.vcxproj
-*vcxproj.*
-
-# MinGW generated files
-*.Debug
-*.Release
-
-# Python byte code
-*.pyc
-
-# Binaries
 # --------
-*.dll
-*.exe
-
-# Custom
-/Throne
+# ----------------------------------------------------------------------------
+*.*#
+*~
+.#*
+*.a
+*.app
+*.autosave
+# Binaries
 /build
-CMakeLists.txt.user*
-/cmake-build-*
 /build-*
-.vscode
-.idea
-
+.claude
+/cmake-build-*
+CMakeLists.txt.user*
+!core/
+*.core
+core
+# Custom
+*.debug
+*.Debug
 # Deploy
 /deployment
-/neko*.sh
-/qtsdk
-
-.vs
-out
+.directory
+*.dll
+.DS_Store
+*.exe
+*.flc
+*.ib_pdb_index
+*.idb
+.idea
+*.ilk
 /libs
+/Makefile*
+# MinGW generated files
+*.moc
+moc_*.cpp
+*.ncb
+/neko*.sh
+*.o
+*.obj
+*.opensdf
+*.orig
+out
+*_pch.h.cpp
+*.pdb
+*.prl
+*.pro.user*
+*.pyc
+# Python byte code
+/.qmake.cache
+/.qmake.stash
+qrc_*.cpp
+.qtcreatordeployment/
+# qtcreator generated files
+/qtsdk
+*.rej
+*.Release
+*.res
+*_resource.rc
+*.sdf
+*.sln
+*.so
+*.so.*
 srslist.h
-.claude
-.qtcreator
+*.suo
+.*.swp
+tags
+# This file is used to ignore files which are generated
+/Throne
+Thumbs.db
+ui_*.h
+*.vcproj
+*vcproj.*.*.user
+*.vcxproj
+*vcxproj.*
+# Vim temporary files
+# Visual Studio generated files
+.vs
+.vscode
+# xemacs temporary files
