@@ -1,6 +1,8 @@
 # Throne (AL4AL fork)
 
-> **AL4AL desktop successor** to the archived [AL4AL/nekoray](https://github.com/AL4AL/nekoray). Upstream: [throneproj/Throne](https://github.com/throneproj/Throne). Roadmap: [docs/GOLDEN.md](docs/GOLDEN.md).
+> **AL4AL desktop successor** to the archived [AL4AL/nekoray](https://github.com/AL4AL/nekoray). Upstream: [throneproj/Throne](https://github.com/throneproj/Throne).
+>
+> **0.1 focus:** Nekoray users can move here — XHTTP cert-pin links accept `pcs` and `pinSHA256`. See [docs/RELEASE.md](docs/RELEASE.md), [docs/GOLDEN.md](docs/GOLDEN.md), [docs/UPSTREAM.md](docs/UPSTREAM.md).
 
 Qt based Desktop cross-platform GUI proxy utility, empowered by [Sing-box](https://github.com/SagerNet/sing-box)
 

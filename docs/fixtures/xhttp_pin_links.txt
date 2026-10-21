@@ -1,0 +1,12 @@
+# Synthetic XHTTP/VLESS link shapes for manual / future headless import checks.
+# Pins are fake 64-hex placeholders — not real servers.
+# Use with Throne UI import or thronectl once a local build+core is available.
+
+# pcs only
+vless://00000000-0000-0000-0000-000000000001@127.0.0.1:443?security=tls&encryption=none&type=xhttp&mode=auto&path=%2F&host=example.com&sni=example.com&fp=chrome&pcs=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#xhttp-pcs
+
+# pinSHA256 only (must resolve like pcs after AL4AL fix)
+vless://00000000-0000-0000-0000-000000000002@127.0.0.1:443?security=tls&encryption=none&type=xhttp&mode=auto&path=%2F&host=example.com&sni=example.com&fp=chrome&pinSHA256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb#xhttp-pinSHA256
+
+# both present — pcs must win
+vless://00000000-0000-0000-0000-000000000003@127.0.0.1:443?security=tls&encryption=none&type=xhttp&mode=auto&path=%2F&host=example.com&sni=example.com&fp=chrome&pcs=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc&pinSHA256=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd#xhttp-pcs-wins
