@@ -1,4 +1,6 @@
-# Throne
+# Throne (AL4AL fork)
+
+> **AL4AL desktop successor** to the archived [AL4AL/nekoray](https://github.com/AL4AL/nekoray). Upstream: [throneproj/Throne](https://github.com/throneproj/Throne). Roadmap: [docs/GOLDEN.md](docs/GOLDEN.md).
 
 Qt based Desktop cross-platform GUI proxy utility, empowered by [Sing-box](https://github.com/SagerNet/sing-box)
 
