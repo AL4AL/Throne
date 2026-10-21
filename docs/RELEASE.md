@@ -31,6 +31,13 @@ ninja -C build
 
 Push gates (`.github/workflows/ci-push.yml`): EngineBoundary + P0 + synthetic P1.
 
+If that workflow file is not on GitHub yet, the local copy lives at `.github/workflows/ci-push.yml`. Pushing it requires a token with the `workflow` scope:
+
+```bash
+gh auth refresh -h github.com -s repo,workflow
+git add .github/workflows/ci-push.yml && git commit -m "ci: add AL4AL push gates" && git push
+```
+
 ## Ship checklist (must be green)
 
 1. **Lint:** `cmake -DROOT=<repo> -P cmake/EngineBoundary.cmake`
