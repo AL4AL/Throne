@@ -61,10 +61,11 @@ Adjust `publish` to match workflow inputs (`r` / `p` / empty).
 
 ```bash
 # UI already built under build/; ThroneCore present beside it
-INPUT_VERSION=0.1.1+al4al.dev-1 cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -S . -B build
+# Deb epoch follows the prior local 1.0.0+al4al.dev-1 package (0.1.x would apt-downgrade).
+INPUT_VERSION=1.0.1+al4al.dev-1 cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -S . -B build
 ninja -C build
-bash script/pack_ubuntu24_amd64.sh 0.1.1+al4al.dev-1
-# → deployment/throne_0.1.1+al4al.dev-1_amd64.deb
+bash script/pack_ubuntu24_amd64.sh 1.0.1+al4al.dev-1
+# → deployment/throne_1.0.1+al4al.dev-1_amd64.deb
 ```
 
 Simulate install before overwriting `/opt`: `apt-get -s install ./deployment/throne_*_amd64.deb`.
