@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(Throne VERSION 0.1)
+project(Throne VERSION 0.1.1)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
@@ -407,6 +407,10 @@ set(PROJECT_SOURCES
         src/ui/setting/dialog_vpn_settings.cpp
         include/ui/setting/dialog_vpn_settings.h
         include/ui/setting/dialog_vpn_settings.ui
+
+        src/ui/setting/dialog_pptp_egress.cpp
+        include/ui/setting/dialog_pptp_egress.h
+        include/ui/setting/dialog_pptp_egress.ui
 
         src/ui/setting/dialog_preset_settings.cpp
         include/ui/setting/dialog_preset_settings.h

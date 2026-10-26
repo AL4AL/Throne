@@ -32,6 +32,12 @@ Upstream reference: [throneproj/Throne](https://github.com/throneproj/Throne).
 | **P3** | Mahsa | Extra open bypass | **Deferred** past 0.1 |
 | **P4** | Throne | Track upstream; packaging | Ongoing |
 
+## Fork features (past 0.1 bar, not upstream)
+
+| Feature | Platforms | Notes |
+|---|---|---|
+| **PPTP egress** | Linux only | Preferences wizard + main-window toggle. NetworkManager PPTP (`never-default`) + host routes for the **selected profile’s server** via `ppp*`. Coexists with System Proxy by merging the PPTP gateway into GNOME `ignore-hosts` / KDE `NoProxy`. Mutually exclusive with Tun Mode. Needs `network-manager-pptp`, `pptp-linux`, `pkexec`. |
+
 ## Explicitly deferred (do not start before 0.1 ships)
 
 - Mahsa “fragment theater” / rotating free-server platform / closed sources

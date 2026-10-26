@@ -10,6 +10,10 @@
 #include "include/scanner/ScanManager.h"
 #include "include/sys/KillSwitch.hpp"
 
+#ifdef Q_OS_LINUX
+#include "include/sys/linux/PptpEgress.h"
+#endif
+
 #include <QDebug>
 
 namespace Engine {
@@ -48,6 +52,9 @@ namespace Engine {
         RemoteApi::Server::instance()->shutdown();
         // Whatever the live mode says: an uncheck may still have its clear queued.
         if (m_shutdownOptions.clearSystemProxy) m_connection->applySystemProxy(false, true);
+#ifdef Q_OS_LINUX
+        Sys::PptpEgress::TearDown();
+#endif
         emit sessionPersisting();
         persistSessionState();
         Scanner::ScanManager::instance()->StopAll(true);

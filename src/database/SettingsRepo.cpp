@@ -70,6 +70,7 @@ namespace Configs {
             {"show_config_security",          &show_config_security},
             {"log_enable_include",            &log_enable_include},
             {"log_enable_exclude",            &log_enable_exclude},
+            {"enable_pptp_egress",            &enable_pptp_egress},
             {"enable_warp",                   &enable_warp},
             {"warp_tos_accepted",             &warp_tos_accepted},
             {"enable_dns_routing",            &enable_dns_routing},
@@ -132,6 +133,7 @@ namespace Configs {
             {"h2_max_concurrent_streams", &h2_max_concurrent_streams},
             {"quic_initial_packet_size", &quic_initial_packet_size},
             {"warp_masque_http_mode",  &warp_masque_http_mode},
+            {"pptp_mtu",               &pptp_mtu},
         };
 
         stringMap = {
@@ -186,6 +188,9 @@ namespace Configs {
             {"ntp_server_address",         &ntp_server_address},
             {"ntp_interval",               &ntp_interval},
             {"ntp_outbound",               &ntp_outbound},
+            {"pptp_gateway",               &pptp_gateway},
+            {"pptp_username",              &pptp_username},
+            {"pptp_password",              &pptp_password},
             {"proxy_scheme",               &proxy_scheme},
             {"main_window_geometry",       &mainWindowGeometry},
             {"xray_log_level",             &xray_log_level},

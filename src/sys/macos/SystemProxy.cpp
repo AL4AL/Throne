@@ -34,7 +34,7 @@ namespace {
     }
 }
 
-QString SystemProxy_Apply(const QString &host, int port, const QString &) {
+QString SystemProxy_Apply(const QString &host, int port, const QString &, const QStringList &) {
     QMutexLocker lock(&proxyMutex);
     QString error;
     const auto services = enabledServices(error);

@@ -87,7 +87,7 @@ namespace {
     }
 }
 
-QString SystemProxy_Apply(const QString &host, int port, const QString &windowsFormat) {
+QString SystemProxy_Apply(const QString &host, int port, const QString &windowsFormat, const QStringList &) {
     QMutexLocker lock(&proxyMutex);
     QStringList errors;
     auto server = proxyServerString(host, port, windowsFormat);

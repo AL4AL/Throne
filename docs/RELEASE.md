@@ -57,7 +57,20 @@ gh workflow run build.yml -R AL4AL/Throne -f tag=al4al-0.1.0 -f publish=r
 
 Adjust `publish` to match workflow inputs (`r` / `p` / empty).
 
+## Local Ubuntu 24.04 `.deb` (AL4AL)
+
+```bash
+# UI already built under build/; ThroneCore present beside it
+INPUT_VERSION=0.1.1+al4al.dev-1 cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -S . -B build
+ninja -C build
+bash script/pack_ubuntu24_amd64.sh 0.1.1+al4al.dev-1
+# → deployment/throne_0.1.1+al4al.dev-1_amd64.deb
+```
+
+Simulate install before overwriting `/opt`: `apt-get -s install ./deployment/throne_*_amd64.deb`.
+
 ## Non-goals until after 0.1
 
 - Matching every Throne upstream release asset name for in-app updater without review
 - Claiming “best of Hiddify+Mahsa” in marketing copy
+- PPTP egress (fork Linux feature; see `docs/GOLDEN.md`) is **not** part of the 0.1 Nekoray-successor promise

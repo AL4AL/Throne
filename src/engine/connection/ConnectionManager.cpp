@@ -23,6 +23,10 @@
 #include "include/global/Utils.hpp"
 #include "include/sys/KillSwitch.hpp"
 
+#ifdef Q_OS_LINUX
+#include "include/sys/linux/PptpEgress.h"
+#endif
+
 #include <QHostAddress>
 #include <QJsonObject>
 #include <QMutexLocker>
@@ -151,6 +155,29 @@ namespace Engine {
             runOnUiThread([=, this] { emit startFinished(resolved.serial, resolved.profileId, outcome, error); });
         };
         auto profile_start_stage2 = [=, this](const Engine::SlowOperation &slowStart) {
+#ifdef Q_OS_LINUX
+            if (Configs::dataManager->settingsRepo->enable_pptp_egress) {
+                if (Configs::dataManager->settingsRepo->spmode_vpn) {
+                    runOnUiThread([slowStart] { slowStart.dismiss(); });
+                    const auto error = MainWindowTr::tr("PPTP egress cannot be used with Tun Mode.");
+                    finish(StartOutcome::StartFailed, error);
+                    if (resolved.interactive) {
+                        runOnUiThread([=, this] { policy()->startFailed(resolved, StartOutcome::StartFailed, "PPTP egress", error); });
+                    }
+                    return false;
+                }
+                MW_show_log(MainWindowTr::tr("[PPTP] Bringing up egress and host routes…"));
+                if (const auto err = Sys::PptpEgress::ApplyProfileRoutes(ent); !err.isEmpty()) {
+                    runOnUiThread([slowStart] { slowStart.dismiss(); });
+                    finish(StartOutcome::StartFailed, err);
+                    if (resolved.interactive) {
+                        runOnUiThread([=, this] { policy()->startFailed(resolved, StartOutcome::StartFailed, "PPTP egress", err); });
+                    }
+                    return false;
+                }
+                MW_show_log(MainWindowTr::tr("[PPTP] Routing profile server via %1").arg(Sys::PptpEgress::CurrentIface()));
+            }
+#endif
             libcore::LoadConfigReq req;
             req.core_config = QJsonObject2QString(result->coreConfig, true).toStdString();
             req.tun_ipv4_cidr = result->tunIPv4CIDR.toStdString();
@@ -374,6 +401,12 @@ namespace Engine {
                 }
             }
             if (Configs::dataManager->settingsRepo->spmode_system_proxy) applySystemProxy(false);
+#ifdef Q_OS_LINUX
+            Sys::PptpEgress::ClearProfileRoutes();
+            if (!m_switchingProfile && !Configs::dataManager->settingsRepo->enable_pptp_egress) {
+                Sys::PptpEgress::TearDown();
+            }
+#endif
             return true;
         };
 

@@ -83,6 +83,9 @@ namespace Engine {
 
         bool setTun(bool enable, const ModeChange &change = {});
 
+        // Linux: route the selected profile's server via NetworkManager PPTP. Returns whether a running profile was restarted.
+        bool setPptpEgress(bool enable, const ModeChange &change = {});
+
         bool chooseRoute(int routeId, bool interactive = true, quint64 restartSerial = 0);
 
         // Any thread. Queued on one worker thread in call order; wait spins a nested loop until this change ran.

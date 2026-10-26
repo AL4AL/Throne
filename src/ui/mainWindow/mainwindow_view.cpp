@@ -237,6 +237,9 @@ void MainWindow::refresh_status(const QString &traffic_update) {
     syncConnectionSourceColumn();
     ui->checkBox_VPN->setChecked(settings->spmode_vpn);
     ui->checkBox_SystemProxy->setChecked(settings->spmode_system_proxy);
+#ifdef Q_OS_LINUX
+    ui->checkBox_PptpEgress->setChecked(settings->enable_pptp_egress);
+#endif
     if (select_mode) {
         ui->label_running->setText(tr("Select") + " *");
         ui->label_running->setToolTip(tr("Select mode, double-click or press Enter to select a profile, press ESC to exit."));
@@ -257,6 +260,9 @@ void MainWindow::refresh_status(const QString &traffic_update) {
         if (settings->spmode_vpn && !settings->spmode_system_proxy) tt << "[Tun]";
         if (!settings->spmode_vpn && settings->spmode_system_proxy) tt << "[" + tr("System Proxy") + "]";
         if (settings->spmode_vpn && settings->spmode_system_proxy) tt << "[Tun+" + tr("System Proxy") + "]";
+#ifdef Q_OS_LINUX
+        if (settings->enable_pptp_egress) tt << "[PPTP]";
+#endif
         if (settings->kill_switch && killSwitchState == Sys::KillSwitch::State::Armed) tt << "[" + tr("Kill switch") + "]";
         if (settings->kill_switch && killSwitchState == Sys::KillSwitch::State::Failed) {
             tt << "[" + (killSwitchBlocking ? tr("Kill switch is blocking traffic") : tr("Kill switch: not active")) + "]";

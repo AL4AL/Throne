@@ -16,6 +16,10 @@
 #include "include/sys/KillSwitch.hpp"
 #include "include/sys/SystemProxy.hpp"
 
+#ifdef Q_OS_LINUX
+#include "include/sys/linux/PptpEgress.h"
+#endif
+
 #include <QThread>
 #include <QTimer>
 
@@ -111,13 +115,21 @@ namespace Engine {
         const auto host = LocalNetwork::InboundConnectHost();
         const auto port = settings->inbound_socks_port;
         const auto format = settings->proxy_scheme;
+        QStringList extraIgnore;
+#ifdef Q_OS_LINUX
+        // GNOME ignore-hosts / KDE NoProxy: keep the PPTP gateway off the mixed inbound (deadlock with vpn-up.sh + system proxy).
+        if (settings->enable_pptp_egress || !settings->pptp_gateway.trimmed().isEmpty()) {
+            const auto gw = settings->pptp_gateway.trimmed();
+            if (!gw.isEmpty()) extraIgnore << gw;
+        }
+#endif
         runOnThread([=] {
             QString error;
             if (!enable) {
                 error = SystemProxy_Clear();
             } else if (Configs::dataManager->settingsRepo->spmode_system_proxy) {
                 // Rechecked: a profile start can queue this after the box was unchecked.
-                error = SystemProxy_Apply(host, port, format);
+                error = SystemProxy_Apply(host, port, format, extraIgnore);
             }
             if (!error.isEmpty()) MW_show_log(MainWindowTr::tr("System proxy: %1").arg(error));
         }, connectionModesSystemProxyThread(), wait);
@@ -176,6 +188,15 @@ namespace Engine {
         if (enable == settings->spmode_vpn) return false;
 
         if (enable) {
+#ifdef Q_OS_LINUX
+            if (settings->enable_pptp_egress) {
+                const auto reason = MainWindowTr::tr("Disable PPTP egress before enabling Tun Mode.");
+                MW_show_log(QStringLiteral("[Tun] Not enabling Tun: %1").arg(reason));
+                if (!m_options.headless) PostNotice({NoticeLevel::Warning, MainWindowTr::tr("Tun Mode"), reason});
+                emit statusChanged();
+                return false;
+            }
+#endif
             // Before any elevation prompt: nothing granted here clears another owner's Tun.
             if (const auto reason = tunBlockedReason(); !reason.isEmpty()) {
                 MW_show_log(QStringLiteral("[Tun] Not enabling Tun: %1").arg(reason));
@@ -206,6 +227,56 @@ namespace Engine {
         if (!change.restart || settings->started_id < 0) return false;
         start(StartRequest{settings->started_id, change.interactive, change.restartSerial});
         return true;
+    }
+
+    bool ConnectionManager::setPptpEgress(bool enable, const ModeChange &change) {
+        ENGINE_CHECK_MAIN_THREAD();
+#ifndef Q_OS_LINUX
+        Q_UNUSED(enable);
+        Q_UNUSED(change);
+        return false;
+#else
+        const auto &settings = Configs::dataManager->settingsRepo;
+        if (enable == settings->enable_pptp_egress) {
+            emit statusChanged();
+            return false;
+        }
+        if (enable) {
+            if (settings->spmode_vpn) {
+                const auto reason = MainWindowTr::tr("Disable Tun Mode before enabling PPTP egress.");
+                MW_show_log(QStringLiteral("[PPTP] Not enabling: %1").arg(reason));
+                if (change.interactive && !m_options.headless) {
+                    PostNotice({NoticeLevel::Warning, MainWindowTr::tr("PPTP Egress"), reason});
+                }
+                emit statusChanged();
+                return false;
+            }
+            if (const auto problem = Sys::PptpEgress::CredentialsProblem(); !problem.isEmpty()) {
+                MW_show_log(QStringLiteral("[PPTP] Not enabling: %1").arg(problem));
+                if (change.interactive && !m_options.headless) {
+                    PostNotice({NoticeLevel::Warning, MainWindowTr::tr("PPTP Egress"), problem});
+                }
+                emit statusChanged();
+                return false;
+            }
+        }
+
+        settings->enable_pptp_egress = enable;
+        if (change.save) settings->Save();
+
+        if (!enable) {
+            runOnNewThread([] { Sys::PptpEgress::TearDown(); });
+        } else if (settings->spmode_system_proxy && runningSnapshot()) {
+            // Refresh ignore-hosts with the PPTP gateway while proxy stays on.
+            applySystemProxy(true);
+        }
+
+        emit statusChanged();
+
+        if (!change.restart || settings->started_id < 0) return false;
+        start(StartRequest{settings->started_id, change.interactive, change.restartSerial});
+        return true;
+#endif
     }
 
     bool ConnectionManager::chooseRoute(int routeId, bool interactive, quint64 restartSerial) {

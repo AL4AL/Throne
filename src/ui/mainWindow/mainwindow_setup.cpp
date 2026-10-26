@@ -684,6 +684,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     });
     connect(ui->checkBox_VPN, &QCheckBox::clicked, this, [=,this](bool checked) { connection()->setTun(checked); });
     connect(ui->checkBox_SystemProxy, &QCheckBox::clicked, this, [=,this](bool checked) { connection()->setSystemProxy(checked); });
+#ifdef Q_OS_LINUX
+    connect(ui->checkBox_PptpEgress, &QCheckBox::clicked, this, [=, this](bool checked) {
+        connection()->setPptpEgress(checked);
+        refresh_status();
+    });
+#else
+    ui->checkBox_PptpEgress->hide();
+    ui->menu_pptp_egress->setVisible(false);
+#endif
     connect(ui->menu_spmode, &QMenu::aboutToShow, this, [=,this]() {
         ui->menu_spmode_disabled->setChecked(!(Configs::dataManager->settingsRepo->spmode_system_proxy || Configs::dataManager->settingsRepo->spmode_vpn));
         ui->menu_spmode_system_proxy->setChecked(Configs::dataManager->settingsRepo->spmode_system_proxy);

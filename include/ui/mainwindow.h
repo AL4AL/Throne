@@ -174,6 +174,8 @@ private slots:
 
     void on_menu_vpn_settings_triggered();
 
+    void on_menu_pptp_egress_triggered();
+
     void on_menu_preset_settings_triggered();
 
     void on_menu_otp_manager_triggered();

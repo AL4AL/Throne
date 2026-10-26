@@ -39,6 +39,7 @@
 #include "include/ui/setting/dialog_otp_manager.h"
 #include "include/ui/setting/dialog_preset_settings.h"
 #include "include/ui/setting/dialog_vpn_settings.h"
+#include "include/ui/setting/dialog_pptp_egress.h"
 #include "include/ui/setting/RawRouteItem.h"
 #include "include/ui/setting/RouteItem.h"
 #include "include/database/RoutesRepo.h"
@@ -99,6 +100,14 @@ void MainWindow::openRouteProfileEditor(int routeId) {
 
 void MainWindow::on_menu_vpn_settings_triggered() {
     USE_DIALOG(DialogVPNSettings)
+}
+
+void MainWindow::on_menu_pptp_egress_triggered() {
+#ifdef Q_OS_LINUX
+    USE_DIALOG(DialogPptpEgress)
+#else
+    MessageBoxInfo(tr("PPTP Egress"), tr("PPTP egress is only available on Linux."));
+#endif
 }
 
 void MainWindow::on_menu_preset_settings_triggered() {
