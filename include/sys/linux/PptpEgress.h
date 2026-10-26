@@ -9,37 +9,47 @@ namespace Configs {
     class Profile;
 }
 
-// Linux-only PPTP split-tunnel egress for Throne outbound dials.
-// Uses NetworkManager PPTP (nmcli) with never-default, then host routes via pkexec ip.
+// Linux PPTP / L2TP-IPsec split-tunnel egress for Throne outbound dials.
+// NetworkManager (nmcli) with never-default, then host routes via pkexec ip.
+// Ubuntu 24.04: network-manager-pptp or network-manager-l2tp (+ strongswan, xl2tpd/go-l2tp).
 namespace Sys::PptpEgress {
-    inline constexpr auto kConnectionName = "throne-pptp-egress";
+    inline constexpr auto kConnectionName = "throne-vpn-egress";
+    inline constexpr auto kLegacyConnectionName = "throne-pptp-egress";
+    inline constexpr auto kStartFailedTitle = "PPTP / L2TP egress";
 
-    // Empty when credentials look usable for a connect attempt.
+    struct Diagnosis {
+        bool ready = false;
+        QString protocol; // pptp | l2tp
+        QStringList missingPackages;
+        QString summary;
+        bool suggestSwitchToL2tp = false;
+        bool canInstallPackages = false;
+    };
+
     QString CredentialsProblem();
+
+    Diagnosis Diagnose();
+
+    // pkexec apt-get for Diagnose().missingPackages; caller must have asked the user. Empty on success.
+    QString InstallMissingPackages();
 
     bool IsUp();
 
-    // Bring up NM PPTP (or reuse if already connected). Empty on success.
     QString EnsureVpnUp();
 
-    // Resolve profile dial targets and install /32|/128 routes via the PPTP iface. Empty on success.
     QString ApplyProfileRoutes(const std::shared_ptr<Configs::Profile> &profile);
 
-    // Remove routes Throne installed for the last ApplyProfileRoutes; leave the VPN up.
     QString ClearProfileRoutes();
 
-    // ClearProfileRoutes + nmcli connection down for kConnectionName.
     QString TearDown();
 
     QString CurrentIface();
 
     QStringList LastRoutedHosts();
 
-    // Connection engine hooks (one place for start/stop branching).
-    // Before LoadConfig: bring up PPTP and host routes when enabled. Empty = OK.
     QString PrepareForProfile(const std::shared_ptr<Configs::Profile> &profile, bool tunMode);
-    // After profile stop: drop host routes; tear down VPN if PPTP is off and not mid-switch.
+
     void CleanupAfterProfile(bool switchingProfiles);
-    // PPTP server address(es) to keep off GNOME/KDE system proxy.
+
     QStringList SystemProxyIgnoreHosts();
 }

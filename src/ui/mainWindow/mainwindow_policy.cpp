@@ -11,6 +11,7 @@
 
 #ifdef Q_OS_LINUX
 #include "include/sys/linux/LinuxCap.h"
+#include "include/sys/linux/PptpEgress.h"
 #endif
 #ifdef Q_OS_MACOS
 #include "include/sys/macos/MacOS.h"
@@ -112,6 +113,19 @@ void MainWindow::extraCoreNotPermitted() {
 }
 
 void MainWindow::startFailed(const StartRequest &, StartOutcome, const QString &title, const QString &error) {
+#ifdef Q_OS_LINUX
+    if (title == QLatin1String(Sys::PptpEgress::kStartFailedTitle)) {
+        QMessageBox box(QMessageBox::Warning, tr("PPTP / L2TP Egress"), error, QMessageBox::NoButton, this);
+        box.setTextFormat(Qt::PlainText);
+        auto *openSettings = box.addButton(tr("Open settings…"), QMessageBox::ActionRole);
+        auto *close = box.addButton(QMessageBox::Close);
+        box.setDefaultButton(openSettings);
+        box.setEscapeButton(close);
+        box.exec();
+        if (box.clickedButton() == openSettings) on_menu_pptp_egress_triggered();
+        return;
+    }
+#endif
     MessageBoxWarning(title, error);
 }
 

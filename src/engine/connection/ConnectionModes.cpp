@@ -187,7 +187,7 @@ namespace Engine {
         if (enable) {
 #ifdef Q_OS_LINUX
             if (settings->enable_pptp_egress) {
-                const auto reason = MainWindowTr::tr("Disable PPTP egress before enabling Tun Mode.");
+                const auto reason = MainWindowTr::tr("Disable PPTP / L2TP egress before enabling Tun Mode.");
                 MW_show_log(QStringLiteral("[Tun] Not enabling Tun: %1").arg(reason));
                 if (!m_options.headless) PostNotice({NoticeLevel::Warning, MainWindowTr::tr("Tun Mode"), reason});
                 emit statusChanged();
@@ -240,10 +240,10 @@ namespace Engine {
         }
         if (enable) {
             if (settings->spmode_vpn) {
-                const auto reason = MainWindowTr::tr("Disable Tun Mode before enabling PPTP egress.");
+                const auto reason = MainWindowTr::tr("Disable Tun Mode before enabling PPTP / L2TP egress.");
                 MW_show_log(QStringLiteral("[PPTP] Not enabling: %1").arg(reason));
                 if (change.interactive && !m_options.headless) {
-                    PostNotice({NoticeLevel::Warning, MainWindowTr::tr("PPTP Egress"), reason});
+                    PostNotice({NoticeLevel::Warning, MainWindowTr::tr("PPTP / L2TP Egress"), reason});
                 }
                 emit statusChanged();
                 return false;
@@ -251,7 +251,7 @@ namespace Engine {
             if (const auto problem = Sys::PptpEgress::CredentialsProblem(); !problem.isEmpty()) {
                 MW_show_log(QStringLiteral("[PPTP] Not enabling: %1").arg(problem));
                 if (change.interactive && !m_options.headless) {
-                    PostNotice({NoticeLevel::Warning, MainWindowTr::tr("PPTP Egress"), problem});
+                    PostNotice({NoticeLevel::Warning, MainWindowTr::tr("PPTP / L2TP Egress"), problem});
                 }
                 emit statusChanged();
                 return false;

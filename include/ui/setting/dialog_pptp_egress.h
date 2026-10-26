@@ -26,6 +26,12 @@ public slots:
     void accept() override;
 
 private:
+    void syncProtocolUi();
+    void saveFieldsToSettings(bool persist);
+    void refreshRuntimeStatus(const QString &detail = {});
+    void onCheckFix();
+    void onTestTunnel();
+
     Ui::DialogPptpEgress *ui;
     Validation::Form *form = nullptr;
     Engine::EditLock settingsLock{Engine::EditTarget::Settings};

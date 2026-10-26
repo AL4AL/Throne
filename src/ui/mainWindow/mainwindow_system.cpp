@@ -106,7 +106,7 @@ void MainWindow::on_menu_pptp_egress_triggered() {
 #ifdef Q_OS_LINUX
     USE_DIALOG(DialogPptpEgress)
 #else
-    MessageBoxInfo(tr("PPTP Egress"), tr("PPTP egress is only available on Linux."));
+    MessageBoxInfo(tr("PPTP / L2TP Egress"), tr("PPTP / L2TP egress is only available on Linux."));
 #endif
 }
 

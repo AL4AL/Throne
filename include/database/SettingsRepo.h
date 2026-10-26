@@ -281,11 +281,13 @@ namespace Configs {
         QString ntp_interval = "";
         QString ntp_outbound = "direct"; // "direct" or "proxy"
 
-        // Linux PPTP egress (host routes for the selected profile via NetworkManager PPTP).
+        // Linux VPN egress (PPTP or L2TP/IPsec) via NetworkManager; host-routes the selected profile.
         bool enable_pptp_egress = false;
+        QString egress_protocol = "pptp"; // "pptp" | "l2tp"
         QString pptp_gateway = "";
         QString pptp_username = "";
         QString pptp_password = "";
+        QString egress_ipsec_psk = ""; // L2TP/IPsec pre-shared key
         int pptp_mtu = 1200;
 
         // Warp

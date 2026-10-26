@@ -164,7 +164,9 @@ namespace Engine {
                 runOnUiThread([slowStart] { slowStart.dismiss(); });
                 finish(StartOutcome::StartFailed, err);
                 if (resolved.interactive) {
-                    runOnUiThread([=, this] { policy()->startFailed(resolved, StartOutcome::StartFailed, "PPTP egress", err); });
+                    runOnUiThread([=, this] {
+                        policy()->startFailed(resolved, StartOutcome::StartFailed, Sys::PptpEgress::kStartFailedTitle, err);
+                    });
                 }
                 return false;
             }

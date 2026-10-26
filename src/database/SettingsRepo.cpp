@@ -188,9 +188,11 @@ namespace Configs {
             {"ntp_server_address",         &ntp_server_address},
             {"ntp_interval",               &ntp_interval},
             {"ntp_outbound",               &ntp_outbound},
+            {"egress_protocol",            &egress_protocol},
             {"pptp_gateway",               &pptp_gateway},
             {"pptp_username",              &pptp_username},
             {"pptp_password",              &pptp_password},
+            {"egress_ipsec_psk",           &egress_ipsec_psk},
             {"proxy_scheme",               &proxy_scheme},
             {"main_window_geometry",       &mainWindowGeometry},
             {"xray_log_level",             &xray_log_level},
@@ -286,6 +288,15 @@ namespace Configs {
             }
             if (key == "route_auto_update_last") {
                 route_auto_update_last = str.toLongLong();
+                continue;
+            }
+            // Brief pptp_* names from the first L2TP egress build.
+            if (key == "pptp_protocol" && egress_protocol == QLatin1String("pptp")) {
+                egress_protocol = str;
+                continue;
+            }
+            if (key == "pptp_psk" && egress_ipsec_psk.isEmpty()) {
+                egress_ipsec_psk = str;
                 continue;
             }
             if (auto boolVal = boolMap.find(key); boolVal != boolMap.end()) {

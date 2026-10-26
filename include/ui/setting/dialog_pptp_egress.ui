@@ -6,18 +6,18 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>480</width>
-    <height>360</height>
+    <width>520</width>
+    <height>480</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>PPTP Egress</string>
+   <string>PPTP / L2TP Egress</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QLabel" name="status_label">
      <property name="text">
-      <string>Configure a Linux PPTP tunnel. When enabled, Throne routes the selected profile's server through it. Cannot be used with Tun Mode.</string>
+      <string>Configure a Linux NetworkManager tunnel. When enabled, Throne routes the selected profile's server through it. Cannot be used with Tun Mode. Providers labeled “PPTP / L2TP” with a pre-shared key usually need L2TP/IPsec.</string>
      </property>
      <property name="wordWrap">
       <bool>true</bool>
@@ -27,55 +27,82 @@
    <item>
     <widget class="QGroupBox" name="credentials_box">
      <property name="title">
-      <string>PPTP connection</string>
+      <string>VPN connection</string>
      </property>
      <layout class="QFormLayout" name="formLayout">
       <item row="0" column="0">
+       <widget class="QLabel" name="label_protocol">
+        <property name="text">
+         <string>Protocol</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="pptp_protocol"/>
+      </item>
+      <item row="1" column="0">
        <widget class="QLabel" name="label_gateway">
         <property name="text">
          <string>Server</string>
         </property>
        </widget>
       </item>
-      <item row="0" column="1">
+      <item row="1" column="1">
        <widget class="QLineEdit" name="pptp_gateway">
         <property name="placeholderText">
          <string notr="true">vpn.example.com</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="0">
+      <item row="2" column="0">
        <widget class="QLabel" name="label_username">
         <property name="text">
          <string>Username</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
+      <item row="2" column="1">
        <widget class="QLineEdit" name="pptp_username"/>
       </item>
-      <item row="2" column="0">
+      <item row="3" column="0">
        <widget class="QLabel" name="label_password">
         <property name="text">
          <string>Password</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="3" column="1">
        <widget class="QLineEdit" name="pptp_password">
         <property name="echoMode">
          <enum>QLineEdit::EchoMode::Password</enum>
         </property>
        </widget>
       </item>
-      <item row="3" column="0">
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_psk">
+        <property name="text">
+         <string>Pre-shared key</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QLineEdit" name="pptp_psk">
+        <property name="echoMode">
+         <enum>QLineEdit::EchoMode::Password</enum>
+        </property>
+        <property name="placeholderText">
+         <string>IPsec PSK (L2TP/IPsec)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0">
        <widget class="QLabel" name="label_mtu">
         <property name="text">
          <string notr="true">MTU</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="1">
+      <item row="5" column="1">
        <widget class="QLineEdit" name="pptp_mtu">
         <property name="text">
          <string notr="true">1200</string>
@@ -84,6 +111,43 @@
       </item>
      </layout>
     </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="actionsLayout">
+     <item>
+      <widget class="QPushButton" name="btn_check_fix">
+       <property name="text">
+        <string>Check &amp;&amp; fix system</string>
+       </property>
+       <property name="toolTip">
+        <string>Diagnose NetworkManager VPN plugins and offer to install missing Ubuntu packages with your permission</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="btn_test">
+       <property name="text">
+        <string>Test tunnel</string>
+       </property>
+       <property name="toolTip">
+        <string>Bring the VPN up once (no profile routes) to verify credentials</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="actionsSpacer">
+       <property name="orientation">
+        <enum>Qt::Orientation::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
    </item>
    <item>
     <widget class="QLabel" name="runtime_status">

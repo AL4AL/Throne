@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(Throne VERSION 1.0.2)
+project(Throne VERSION 1.0.5)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 

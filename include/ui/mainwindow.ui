@@ -316,10 +316,10 @@ QToolButton::menu-indicator {
         <item>
          <widget class="QCheckBox" name="checkBox_PptpEgress">
           <property name="toolTip">
-           <string>Route the selected profile's server through a configured PPTP VPN (Linux only)</string>
+           <string>Route the selected profile's server through a configured PPTP or L2TP/IPsec VPN (Linux only)</string>
           </property>
           <property name="text">
-           <string>PPTP Egress</string>
+           <string>PPTP / L2TP Egress</string>
           </property>
          </widget>
         </item>
@@ -1180,8 +1180,8 @@ QToolButton::menu-indicator {
    </property>
   </action>
   <action name="menu_pptp_egress">
-   <property name="text">
-    <string>PPTP Egress</string>
+    <property name="text">
+     <string>PPTP / L2TP Egress</string>
    </property>
   </action>
   <action name="menu_preset_settings">

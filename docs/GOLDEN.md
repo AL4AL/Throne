@@ -14,7 +14,7 @@ Also: [RELEASE.md](RELEASE.md) · [UPSTREAM.md](UPSTREAM.md)
 
 | Feature | Notes |
 |---|---|
-| **PPTP tunnel (Linux)** | Preferences + main-window checkbox. Routes the **selected profile’s server** through NetworkManager PPTP. Cannot run with Tun Mode. With System Proxy, the PPTP server is added to ignore-hosts. Needs `network-manager-pptp`, `pptp-linux`, `pkexec`. |
+| **PPTP / L2TP egress (Linux)** | Preferences + main-window checkbox. Routes the **selected profile’s server** through NetworkManager **PPTP** or **L2TP/IPsec** (PSK). Cannot run with Tun Mode. With System Proxy, the VPN server is added to ignore-hosts. Diagnoses missing plugins and can install Ubuntu 24.04 packages (`network-manager-pptp` / `network-manager-l2tp` + deps) via `pkexec` with permission. |
 | **Remove duplicates on update** | Checkbox on the Subscription edit dialog (same setting as Advanced). |
 
 ## Later (not before 0.1)
