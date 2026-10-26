@@ -9,8 +9,6 @@
 #include "include/sys/linux/PptpEgress.h"
 #endif
 
-#include <QCheckBox>
-#include <QCheckBox>
 #include <QMessageBox>
 
 DialogPptpEgress::DialogPptpEgress(QWidget *parent) : QDialog(parent), ui(new Ui::DialogPptpEgress) {

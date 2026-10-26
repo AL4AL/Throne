@@ -17,7 +17,7 @@
    <item>
     <widget class="QLabel" name="status_label">
      <property name="text">
-      <string>Configure a Linux PPTP tunnel. When enabled, Throne routes the selected profile's server through it.</string>
+      <string>Configure a Linux PPTP tunnel. When enabled, Throne routes the selected profile's server through it. Cannot be used with Tun Mode.</string>
      </property>
      <property name="wordWrap">
       <bool>true</bool>

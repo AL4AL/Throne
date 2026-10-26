@@ -10,14 +10,24 @@
 # - Depends list for noble Qt6 (t64 names with non-t64 alternatives)
 #
 # Usage:
-#   THRONE_BIN=./build/Throne THRONE_CORE=./build/ThroneCore \
-#     ./script/pack_ubuntu24_amd64.sh [version]
+#   ./script/pack_ubuntu24_amd64.sh                 # version from packaging/ubuntu24_version.txt
+#   ./script/pack_ubuntu24_amd64.sh 1.0.3+al4al.dev-1
+#   UBUNTU_DEB_VERSION=... ./script/pack_ubuntu24_amd64.sh
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DIST_LINUX="$ROOT/dist/linux"
-# Non-native version (has debian revision) so changelog.Debian.gz is the correct name.
-VERSION="${1:-1.0.2+al4al.dev-1}"
+VERSION_FILE="$ROOT/packaging/ubuntu24_version.txt"
+if [[ -n ${1:-} ]]; then
+  VERSION=$1
+elif [[ -n ${UBUNTU_DEB_VERSION:-} ]]; then
+  VERSION=$UBUNTU_DEB_VERSION
+elif [[ -f $VERSION_FILE ]]; then
+  VERSION=$(tr -d '[:space:]' <"$VERSION_FILE")
+else
+  echo "pass a version, set UBUNTU_DEB_VERSION, or create $VERSION_FILE" >&2
+  exit 1
+fi
 ARCH=amd64
 THRONE_BIN=${THRONE_BIN:-$ROOT/build/Throne}
 THRONE_CORE=${THRONE_CORE:-$ROOT/build/ThroneCore}

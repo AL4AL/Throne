@@ -157,24 +157,18 @@ namespace Engine {
         auto profile_start_stage2 = [=, this](const Engine::SlowOperation &slowStart) {
 #ifdef Q_OS_LINUX
             if (Configs::dataManager->settingsRepo->enable_pptp_egress) {
-                if (Configs::dataManager->settingsRepo->spmode_vpn) {
-                    runOnUiThread([slowStart] { slowStart.dismiss(); });
-                    const auto error = MainWindowTr::tr("PPTP egress cannot be used with Tun Mode.");
-                    finish(StartOutcome::StartFailed, error);
-                    if (resolved.interactive) {
-                        runOnUiThread([=, this] { policy()->startFailed(resolved, StartOutcome::StartFailed, "PPTP egress", error); });
-                    }
-                    return false;
-                }
                 MW_show_log(MainWindowTr::tr("[PPTP] Bringing up egress and host routes…"));
-                if (const auto err = Sys::PptpEgress::ApplyProfileRoutes(ent); !err.isEmpty()) {
-                    runOnUiThread([slowStart] { slowStart.dismiss(); });
-                    finish(StartOutcome::StartFailed, err);
-                    if (resolved.interactive) {
-                        runOnUiThread([=, this] { policy()->startFailed(resolved, StartOutcome::StartFailed, "PPTP egress", err); });
-                    }
-                    return false;
+            }
+            if (const auto err = Sys::PptpEgress::PrepareForProfile(ent, Configs::dataManager->settingsRepo->spmode_vpn);
+                !err.isEmpty()) {
+                runOnUiThread([slowStart] { slowStart.dismiss(); });
+                finish(StartOutcome::StartFailed, err);
+                if (resolved.interactive) {
+                    runOnUiThread([=, this] { policy()->startFailed(resolved, StartOutcome::StartFailed, "PPTP egress", err); });
                 }
+                return false;
+            }
+            if (Configs::dataManager->settingsRepo->enable_pptp_egress) {
                 MW_show_log(MainWindowTr::tr("[PPTP] Routing profile server via %1").arg(Sys::PptpEgress::CurrentIface()));
             }
 #endif
@@ -402,10 +396,7 @@ namespace Engine {
             }
             if (Configs::dataManager->settingsRepo->spmode_system_proxy) applySystemProxy(false);
 #ifdef Q_OS_LINUX
-            Sys::PptpEgress::ClearProfileRoutes();
-            if (!m_switchingProfile && !Configs::dataManager->settingsRepo->enable_pptp_egress) {
-                Sys::PptpEgress::TearDown();
-            }
+            Sys::PptpEgress::CleanupAfterProfile(m_switchingProfile);
 #endif
             return true;
         };

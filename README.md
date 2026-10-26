@@ -1,10 +1,8 @@
 # Throne (AL4AL fork)
 
-> **AL4AL desktop successor** to the archived [AL4AL/nekoray](https://github.com/AL4AL/nekoray). Upstream: [throneproj/Throne](https://github.com/throneproj/Throne).
->
-> **0.1 focus:** Nekoray users can move here — XHTTP cert-pin links accept `pcs` and `pinSHA256`. See [docs/RELEASE.md](docs/RELEASE.md), [docs/GOLDEN.md](docs/GOLDEN.md), [docs/UPSTREAM.md](docs/UPSTREAM.md).
+Qt desktop proxy manager (sing-box / Xray). Fork of [throneproj/Throne](https://github.com/throneproj/Throne); successor to archived [AL4AL/nekoray](https://github.com/AL4AL/nekoray).
 
-Qt based Desktop cross-platform GUI proxy utility, empowered by [Sing-box](https://github.com/SagerNet/sing-box)
+**What we ship and how we release:** [docs/GOLDEN.md](docs/GOLDEN.md) · [docs/RELEASE.md](docs/RELEASE.md) · [docs/UPSTREAM.md](docs/UPSTREAM.md)
 
 Supports Windows 11/10/8/7 / Linux / MacOS out of the box.
 
@@ -17,7 +15,9 @@ Apple platforms have a very strict security policy and since Throne does not hav
 
 ### GitHub Releases (Portable ZIP)
 
-[![GitHub All Releases](https://img.shields.io/github/downloads/throneproj/Throne/total?label=downloads-total&logo=github&style=flat-square)](https://github.com/throneproj/Throne/releases)
+[![GitHub All Releases](https://img.shields.io/github/downloads/AL4AL/Throne/total?label=downloads-total&logo=github&style=flat-square)](https://github.com/AL4AL/Throne/releases)
+
+Upstream portable builds: [throneproj/Throne releases](https://github.com/throneproj/Throne/releases).
 
 ### Linux CLI installer
 ```bash
@@ -25,9 +25,11 @@ curl -fsSL https://raw.githubusercontent.com/throneproj/Throne/dev/script/instal
 ```
 
 ### Linux package repositories
-Every stable release is published to signed APT and RPM repositories (the system-Qt packages, x64 and ARM64) and to the AUR, so your package manager keeps Throne up to date. See the [installation guide](https://throneproj.github.io/get_started/installation/#apt-repository) for details.
+Every stable **upstream** release is published to signed APT and RPM repositories (the system-Qt packages, x64 and ARM64) and to the AUR. See the [installation guide](https://throneproj.github.io/get_started/installation/#apt-repository).
 
-Debian / Ubuntu:
+For a local Ubuntu 24.04 system-Qt `.deb` from this fork: `script/pack_ubuntu24_amd64.sh`.
+
+Debian / Ubuntu (upstream):
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
 sudo curl -fsSLo /etc/apt/keyrings/throne.asc https://throneproj.github.io/Throne/throne.asc
@@ -50,7 +52,6 @@ sudo zypper install throne
 Arch Linux (AUR): `yay -S throne` or `paru -S throne`
 
 ### macOS (Homebrew)
-Every stable release is also published to Throne's own Homebrew tap (macOS 13 or newer, Apple Silicon and Intel). The cask installs `Throne.app` to `/Applications` and removes the quarantine flag; update with `brew upgrade --cask throne`. See the [installation guide](https://throneproj.github.io/get_started/installation/#homebrew) for details.
 ```bash
 brew install --cask throneproj/tap/throne
 ```
@@ -102,23 +103,23 @@ Deeplinks are also supported, read the [documentation](https://throneproj.github
 - [srombauts/sqlitecpp](https://github.com/srombauts/sqlitecpp)
 
 ## FAQ
-**How does this project differ from the original Nekoray?** <br/>
-Nekoray's developer partially abandoned the project on December of 2023, some minor updates were done recently but the project is now officially archived. This project was meant to continue the way of the original project, with lots of improvements, tons of new features and also, removal of obsolete features and simplifications.
+**How does this fork relate to Nekoray and upstream Throne?**  
+[AL4AL/nekoray](https://github.com/AL4AL/nekoray) is archived. Ongoing desktop work is this Throne fork. Upstream Throne continues independently; we merge from `throneproj/Throne` and keep a few fork-only features (see [docs/GOLDEN.md](docs/GOLDEN.md)).
 
-**Why does my Anti-Virus detect Throne and/or its Core as malware?** <br/>
+**Why does my Anti-Virus detect Throne and/or its Core as malware?**  
 Throne's built-in update functionallity downloads the new release, removes the old files and replaces them with the new ones, which is quite simliar to what malwares do, remove your files and replace them with an encrypted version of your files.
 
-**Is setting the `SUID` bit really needed on Linux?** <br/>
+**Is setting the `SUID` bit really needed on Linux?**  
 To create and manage a system TUN interface, root access is required, without it, you will have to grant the Core some `Cap_xxx_admin` and still, need to enter your password 3 to 4 times per TUN activation. You can also opt to disable the automatic privilege escalation in `Basic Settings`->`Security`, but note that features that require root access will stop working unless you manually grant the needed permissions.
 
-**Why does my internet stop working after I force quit Throne?** <br/>
-If Throne is force-quit while `System proxy` is enabled, the process ends immediately and Throne cannot reset the proxy. <br/>
+**Why does my internet stop working after I force quit Throne?**  
+If Throne is force-quit while `System proxy` is enabled, the process ends immediately and Throne cannot reset the proxy.  
 Solution:
 - Always close Throne normally.
 - If you force quit by accident, open Throne again, enable `System proxy`, then disable it- this will reset the settings.
 
-**Where are the downloadable route profiles/rulesets coming from?**<br/>
+**Where are the downloadable route profiles/rulesets coming from?**  
 They are located at the [routeprofiles](https://github.com/throneproj/routeprofiles) repository.
 
-**How does "Throne-\<version\>-debian-system-qt-x64.deb" differ from "Throne-\<version\>-debian-x64.deb" and why is the latter 3 times heavier then the former?**<br/>
+**How does "Throne-\<version\>-debian-system-qt-x64.deb" differ from "Throne-\<version\>-debian-x64.deb" and why is the latter 3 times heavier then the former?**  
 The first one does not pack the Qt libraries and relies on those installed on the host. The second one packs everything needed with itself, thus being heavier. The reason the first one exists is that on legacy systems provided Qt libraries use unsupported system features. If a graphical interface fails to load for your system, you may try to download the system-qt version and install fitting Qt libraries from your package manager or compile them from source.

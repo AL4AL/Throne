@@ -117,11 +117,8 @@ namespace Engine {
         const auto format = settings->proxy_scheme;
         QStringList extraIgnore;
 #ifdef Q_OS_LINUX
-        // GNOME ignore-hosts / KDE NoProxy: keep the PPTP gateway off the mixed inbound (deadlock with vpn-up.sh + system proxy).
-        if (settings->enable_pptp_egress || !settings->pptp_gateway.trimmed().isEmpty()) {
-            const auto gw = settings->pptp_gateway.trimmed();
-            if (!gw.isEmpty()) extraIgnore << gw;
-        }
+        // GNOME ignore-hosts / KDE NoProxy: keep the PPTP gateway off the mixed inbound.
+        extraIgnore = Sys::PptpEgress::SystemProxyIgnoreHosts();
 #endif
         runOnThread([=] {
             QString error;

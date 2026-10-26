@@ -283,4 +283,26 @@ namespace Sys::PptpEgress {
         QMutexLocker lock(&pptpMutex);
         return routedHosts;
     }
+
+    QString PrepareForProfile(const std::shared_ptr<Configs::Profile> &profile, bool tunMode) {
+        const auto &settings = Configs::dataManager->settingsRepo;
+        if (!settings->enable_pptp_egress) return {};
+        if (tunMode || settings->spmode_vpn) {
+            return QObject::tr("PPTP cannot be used with Tun Mode. Turn off Tun or PPTP.");
+        }
+        return ApplyProfileRoutes(profile);
+    }
+
+    void CleanupAfterProfile(bool switchingProfiles) {
+        ClearProfileRoutes();
+        const auto &settings = Configs::dataManager->settingsRepo;
+        if (!switchingProfiles && !settings->enable_pptp_egress) TearDown();
+    }
+
+    QStringList SystemProxyIgnoreHosts() {
+        const auto &settings = Configs::dataManager->settingsRepo;
+        if (!settings->enable_pptp_egress && settings->pptp_gateway.trimmed().isEmpty()) return {};
+        const auto gw = settings->pptp_gateway.trimmed();
+        return gw.isEmpty() ? QStringList{} : QStringList{gw};
+    }
 }

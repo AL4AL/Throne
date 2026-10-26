@@ -34,4 +34,12 @@ namespace Sys::PptpEgress {
     QString CurrentIface();
 
     QStringList LastRoutedHosts();
+
+    // Connection engine hooks (one place for start/stop branching).
+    // Before LoadConfig: bring up PPTP and host routes when enabled. Empty = OK.
+    QString PrepareForProfile(const std::shared_ptr<Configs::Profile> &profile, bool tunMode);
+    // After profile stop: drop host routes; tear down VPN if PPTP is off and not mid-switch.
+    void CleanupAfterProfile(bool switchingProfiles);
+    // PPTP server address(es) to keep off GNOME/KDE system proxy.
+    QStringList SystemProxyIgnoreHosts();
 }
