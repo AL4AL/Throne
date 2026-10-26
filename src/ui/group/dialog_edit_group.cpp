@@ -54,11 +54,15 @@ DialogEditGroup::DialogEditGroup(const std::shared_ptr<Configs::Group> &ent, QWi
     ui->auto_clear_unavailable->setChecked(ent->auto_clear_unavailable);
     ui->skip_auto_update->setChecked(ent->skip_auto_update);
     subOptions = ent->sub_options;
+    ui->remove_duplicates->setChecked(subOptions.remove_duplicates);
     endpoint = ent->endpoint;
     connect(ui->advanced, &QPushButton::clicked, this, [this] {
+        // Keep Advanced in step with the main-page checkbox before it opens.
+        subOptions.remove_duplicates = ui->remove_duplicates->isChecked();
         auto dialog = new DialogEditGroupAdvanced(subOptions, this->ent->sub_info.server_interval, endpoint, ui->type->currentIndex() == 1, this);
         connect(dialog, &QDialog::accepted, this, [this, dialog] {
             subOptions = dialog->Options();
+            ui->remove_duplicates->setChecked(subOptions.remove_duplicates);
             endpoint = dialog->Endpoint();
         });
         connect(dialog, &QDialog::finished, dialog, &QDialog::deleteLater);
@@ -270,6 +274,7 @@ void DialogEditGroup::accept() {
     ent->auto_clear_unavailable = ui->auto_clear_unavailable->isChecked();
     ent->url = newUrl;
     ent->skip_auto_update = ui->skip_auto_update->isChecked();
+    subOptions.remove_duplicates = ui->remove_duplicates->isChecked();
     ent->sub_options = subOptions;
     restartNeeded = endpoint != ent->endpoint && editGroupRunningProfileInherits(ent->Profiles());
     ent->endpoint = endpoint;

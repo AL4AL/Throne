@@ -152,6 +152,16 @@
         </property>
        </widget>
       </item>
+      <item row="2" column="1">
+       <widget class="QCheckBox" name="remove_duplicates">
+        <property name="toolTip">
+         <string>After each subscription update, keep one profile when several share the same configuration.</string>
+        </property>
+        <property name="text">
+         <string>Remove duplicates on update</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>
@@ -201,6 +211,7 @@
   <tabstop>advanced</tabstop>
   <tabstop>url</tabstop>
   <tabstop>skip_auto_update</tabstop>
+  <tabstop>remove_duplicates</tabstop>
   <tabstop>copy_links</tabstop>
   <tabstop>copy_links_nkr</tabstop>
  </tabstops>

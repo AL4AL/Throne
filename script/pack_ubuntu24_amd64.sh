@@ -17,7 +17,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DIST_LINUX="$ROOT/dist/linux"
 # Non-native version (has debian revision) so changelog.Debian.gz is the correct name.
-VERSION="${1:-1.0.1+al4al.dev-1}"
+VERSION="${1:-1.0.2+al4al.dev-1}"
 ARCH=amd64
 THRONE_BIN=${THRONE_BIN:-$ROOT/build/Throne}
 THRONE_CORE=${THRONE_CORE:-$ROOT/build/ThroneCore}

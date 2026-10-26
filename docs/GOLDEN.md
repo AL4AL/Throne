@@ -37,6 +37,7 @@ Upstream reference: [throneproj/Throne](https://github.com/throneproj/Throne).
 | Feature | Platforms | Notes |
 |---|---|---|
 | **PPTP egress** | Linux only | Preferences wizard + main-window toggle. NetworkManager PPTP (`never-default`) + host routes for the **selected profile’s server** via `ppp*`. Coexists with System Proxy by merging the PPTP gateway into GNOME `ignore-hosts` / KDE `NoProxy`. Mutually exclusive with Tun Mode. Needs `network-manager-pptp`, `pptp-linux`, `pkexec`. |
+| **Remove duplicates on update (main pane)** | Desktop | Surfaced upstream’s `sub_options.remove_duplicates` on the Subscription edit dialog (kept in sync with Advanced). Same GroupUpdater post-update dedupe path. |
 
 ## Explicitly deferred (do not start before 0.1 ships)
 
