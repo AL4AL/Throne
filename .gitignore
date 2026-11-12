@@ -88,4 +88,5 @@ out
 /libs
 srslist.h
 .claude
+.cursor/
 .qtcreator
